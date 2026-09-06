@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --color-bg: #050505;
+    --color-card: #0d0d0d;
+    --color-border: #1a1a1c;
+    --color-ink: #ffffff;
+    --color-ink-muted: #7a7a7d;
+    --color-accent: #ffffff;
+    --color-hairline: #242426;
+    --color-pos: #2dd4bf;
+    --color-neg: #ef4444;
+    --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: var(--color-bg);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    display: none;
+  }
+
+  body {
+    font-family: "Inter", -apple-system, "Segoe UI", sans-serif;
+  }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: rgba(5, 5, 5, 0.8);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid transparent;
+    transition: border-color 200ms ease;
+  }
+
+  header.is-scrolled {
+    border-bottom-color: var(--color-border);
+  }
+
+  .header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0.75rem 1rem;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .brand img {
+    width: 26px;
+    height: 26px;
+    object-fit: contain;
+  }
+
+  .brand span {
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--color-ink);
+  }
+
+  .sign-in {
+    position: relative;
+    display: inline-flex;
+    overflow: hidden;
+    border-radius: 9999px;
+    background-color: rgba(122, 122, 125, 0.10);
+    padding: 0.6875rem 1.625rem;
+    font-family: inherit;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-accent);
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+  }
+
+  .sign-in__fill {
+    position: absolute;
+    inset: 0;
+    background-color: #ffffff;
+    background-image:
+      radial-gradient(circle, rgba(255,45,148,0.35) 0%, rgba(255,45,148,0) 65%),
+      radial-gradient(circle, rgba(255,209,0,0.35) 0%, rgba(255,209,0,0) 65%),
+      radial-gradient(circle, rgba(0,140,255,0.35) 0%, rgba(0,140,255,0) 65%),
+      radial-gradient(circle, rgba(0,210,120,0.35) 0%, rgba(0,210,120,0) 65%);
+    background-size: 220% 220%, 200% 200%, 240% 240%, 190% 190%;
+    background-repeat: no-repeat;
+    background-position: 60% 35%, 68% 48%, 50% 70%, 52% 68%;
+    transform: scaleY(0);
+    transform-origin: bottom;
+    transition: transform 300ms ease-out;
+  }
+
+  .sign-in:hover .sign-in__fill {
+    transform: scaleY(1);
+    animation: sign-in-shimmer 1s linear infinite;
+    animation-delay: 300ms;
+  }
+
+  @keyframes sign-in-shimmer {
+    0%    { background-position: 60% 35%, 68% 48%, 50% 70%, 52% 68%; }
+    12.5% { background-position: 52.7% 52.7%, 53.9% 42.1%, 43.6% 54.4%, 57.3% 80.7%; }
+    25%   { background-position: 35% 60%, 48% 28%, 28% 48%, 70% 86%; }
+    37.5% { background-position: 17.3% 52.7%, 53.9% 13.9%, 12.4% 54.4%, 82.7% 80.7%; }
+    50%   { background-position: 10% 35%, 68% 8%, 6% 70%, 88% 68%; }
+    62.5% { background-position: 17.3% 17.3%, 82.1% 13.9%, 12.4% 85.6%, 82.7% 55.3%; }
+    75%   { background-position: 35% 10%, 88% 28%, 28% 92%, 70% 50%; }
+    87.5% { background-position: 52.7% 17.3%, 82.1% 42.1%, 43.6% 85.6%, 57.3% 55.3%; }
+    100%  { background-position: 60% 35%, 68% 48%, 50% 70%, 52% 68%; }
+  }
+
+  .sign-in__label {
+    position: relative;
+    transition: color 300ms;
+  }
+
+  .sign-in:hover .sign-in__label {
+    color: var(--color-bg);
+  }
+
+  .subnav-inner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0.5rem 1rem 1rem;
+  }
+
+  .nav-pill {
+    position: absolute;
+    top: 0.5rem;
+    left: 1rem;
+    height: calc(100% - 1.5rem);
+    border-radius: 9999px;
+    background-color: rgba(122, 122, 125, 0.10);
+    transition: transform 300ms cubic-bezier(0.65, 0, 0.35, 1), width 300ms cubic-bezier(0.65, 0, 0.35, 1);
+    z-index: 0;
+  }
+
+  .nav-item {
+    position: relative;
+    z-index: 1;
+    border-radius: 9999px;
+    padding: 0.5rem 1.1rem;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--color-ink-muted);
+    text-decoration: none;
+    transition: color 200ms ease;
+  }
+
+  .nav-item.active {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+
+  .earn {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 2rem 1rem 4rem;
+  }
+
+  .earn-inner {
+    display: flex;
+    justify-content: center;
+  }
+
+  .earn-inner > section {
+    width: 100%;
+  }
+
+  .balance-block {
+    margin-bottom: 2.5rem;
+  }
+
+  .balance-block__amount {
+    display: inline-flex;
+    align-items: baseline;
+    font-size: 3rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--color-ink);
+  }
+
+  .digit-cell {
+    position: relative;
+    display: inline-block;
+    height: 1em;
+    overflow: hidden;
+    vertical-align: baseline;
+  }
+
+  .digit-cell--static {
+    overflow: visible;
+  }
+
+  .digit-roll {
+    display: block;
+    transition: transform 260ms cubic-bezier(0.22, 0.9, 0.32, 1);
+  }
+
+  .digit-roll span {
+    display: block;
+    height: 1em;
+    line-height: 1em;
+    text-align: center;
+  }
+
+  .balance-block__sub {
+    margin-top: 0.4rem;
+    font-size: 1.0625rem;
+    color: var(--color-ink-muted);
+  }
+
+  .balance-block__sub em {
+    font-style: italic;
+    color: var(--color-ink);
+  }
+
+  .week-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .week-head h2 {
+    margin: 0;
+    font-size: 1.125rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+  }
+
+  .period-tabs {
+    position: relative;
+    display: flex;
+    border-radius: 9999px;
+    padding: 0.2rem;
+  }
+
+  .period-tabs__pill {
+    position: absolute;
+    top: 0.2rem;
+    bottom: 0.2rem;
+    border-radius: 9999px;
+    background: rgba(122, 122, 125, 0.2);
+    transition: transform 250ms cubic-bezier(0.65, 0, 0.35, 1), width 250ms cubic-bezier(0.65, 0, 0.35, 1);
+    z-index: 0;
+  }
+
+  .period-tab {
+    position: relative;
+    z-index: 1;
+    padding: 0.4rem 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+    background: none;
+    border: none;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: color 200ms ease;
+  }
+
+  .period-tab.active {
+    color: var(--color-ink);
+  }
+
+  .week-chart {
+    margin-top: 1.5rem;
+  }
+
+  .week-chart__plots {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.6rem;
+    height: 298px;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  @media (max-width: 640px) {
+    .week-chart__plots {
+      gap: 0.35rem;
+    }
+  }
+
+  .week-chart__plots.is-dense {
+    gap: 3px;
+  }
+
+  .week-chart__plots.is-dense .bar-tooltip {
+    padding: 0.5rem 0.8rem;
+  }
+
+  .week-chart__plots.is-dense .bar-tooltip__value {
+    font-size: 0.9375rem;
+  }
+
+  .bar-plot {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .bar-rect {
+    position: relative;
+    width: 100%;
+    height: var(--h, 30%);
+    border: 1.5px solid var(--color-hairline);
+    border-radius: 18px 18px 0 0;
+    background: transparent;
+    transition: border-color 200ms ease;
+  }
+
+  .bar-plot:hover .bar-rect {
+    border-color: var(--color-ink-muted);
+  }
+
+  .bar-tooltip {
+    position: absolute;
+    left: 50%;
+    bottom: calc(var(--h, 30%) + 14px);
+    transform: translateX(-50%) translateY(6px) scale(0.94);
+    transform-origin: bottom center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.6rem 1rem;
+    white-space: nowrap;
+    background: rgba(0, 0, 0, 0.32);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 0.9, 0.32, 1);
+    z-index: 2;
+  }
+
+  .bar-tooltip::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -5px;
+    width: 9px;
+    height: 9px;
+    background: rgba(10, 10, 11, 0.4);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    transform: translateX(-50%) rotate(45deg);
+    border-radius: 0 0 2px 0;
+  }
+
+  .bar-plot:first-child .bar-tooltip {
+    left: 0;
+    transform: translateY(6px) scale(0.94);
+    transform-origin: bottom left;
+  }
+
+  .bar-plot:last-child .bar-tooltip {
+    left: auto;
+    right: 0;
+    transform: translateY(6px) scale(0.94);
+    transform-origin: bottom right;
+  }
+
+  .bar-plot:first-child .bar-tooltip::after,
+  .bar-plot:last-child .bar-tooltip::after {
+    display: none;
+  }
+
+  .bar-plot:hover .bar-tooltip {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+
+  .bar-plot:first-child:hover .bar-tooltip,
+  .bar-plot:last-child:hover .bar-tooltip {
+    transform: translateY(0) scale(1);
+  }
+
+  .bar-tooltip__label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .bar-tooltip__value {
+    font-family: var(--font-mono);
+    font-size: 1.0625rem;
+    font-weight: 700;
+    color: var(--color-pos);
+  }
+
+  .bar-rect--live {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .bar-rect__border {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
+  }
+
+  .bar-rect__border path {
+    fill: none;
+    stroke: var(--color-ink-muted);
+    stroke-width: 1.5;
+    vector-effect: non-scaling-stroke;
+    stroke-dasharray: 6 5;
+    animation: bar-rect-march 0.8s linear infinite;
+  }
+
+  @keyframes bar-rect-march {
+    to { stroke-dashoffset: -22; }
+  }
+
+  .week-chart__labels {
+    display: flex;
+    gap: 0.6rem;
+    margin-top: 0.6rem;
+  }
+
+  @media (max-width: 640px) {
+    .week-chart__labels {
+      gap: 0.35rem;
+    }
+  }
+
+  .week-chart__labels.is-dense {
+    gap: 3px;
+  }
+
+  .week-chart__labels.is-dense span {
+    font-size: 0.625rem;
+  }
+
+  .week-chart__labels span {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-ink-muted);
+  }
+
+  .accruals {
+    margin-top: 3rem;
+  }
+
+  .accruals-list {
+    margin-top: 1rem;
+  }
+
+  .accruals-more {
+    display: block;
+    margin: 1rem auto 0;
+    padding: 0.5rem 0;
+    border: none;
+    background: none;
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 200ms ease;
+  }
+
+  .accruals-more:hover {
+    color: var(--color-ink);
+  }
+
+  .accrual-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.85rem 0;
+    font-size: 0.875rem;
+  }
+
+  .accrual-row__date {
+    color: var(--color-ink-muted);
+  }
+
+  .accrual-row__right {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .accrual-row__amount {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--color-pos);
+  }
+
+  .accrual-row__status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    color: var(--color-ink-muted);
+    background: rgba(122, 122, 125, 0.12);
+    white-space: nowrap;
+  }
+
+  .accrual-row__status--pending {
+    color: var(--color-pos);
+    background: rgba(45, 212, 191, 0.12);
+  }
+
+  #landingScreen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #landingScreen[hidden] {
+    display: none;
+  }
+
+  .soon-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5rem;
+    padding: 4rem 1.5rem;
+    text-align: center;
+  }
+
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    text-align: center;
+  }
+
+  .hero__eyes {
+    display: flex;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .eye {
+    position: relative;
+    width: 18px;
+    height: 42px;
+    animation: eye-look 6.5s ease-in-out infinite;
+  }
+
+  .eye__lid {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 9999px;
+    background: var(--color-ink);
+    transform-origin: center;
+    animation: eye-blink 5.2s ease-in-out infinite;
+  }
+
+  @keyframes eye-blink {
+    0%, 90%, 100% { transform: scaleY(1); }
+    94% { transform: scaleY(0.1); }
+  }
+
+  @keyframes eye-look {
+    0%, 12% { transform: translate(0, 0); }
+    22%, 32% { transform: translate(-4px, 0); }
+    42%, 52% { transform: translate(4px, 0); }
+    62%, 70% { transform: translate(0, -3px); }
+    82%, 100% { transform: translate(0, 0); }
+  }
+
+  .hero__tagline {
+    margin: 0;
+    max-width: 320px;
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+    color: var(--color-ink);
+  }
+
+  .hero-stats {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+
+  .hero-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .hero-stat__value {
+    font-family: var(--font-mono);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+
+  .hero-stat__label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .hero-stats__divider {
+    width: 1px;
+    height: 32px;
+    background: var(--color-hairline);
+  }
+
+  .landing-footer__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .landing-footer__x {
+    display: inline-flex;
+    color: var(--color-ink-muted);
+    transition: color 200ms ease;
+  }
+
+  .landing-footer__x:hover {
+    color: var(--color-ink);
+  }
+
+  .landing-footer__text {
+    font-size: 0.875rem;
+    color: var(--color-ink-muted);
+  }
+
+  .toast {
+    position: fixed;
+    top: 1.25rem;
+    left: 50%;
+    z-index: 100;
+    transform: translateX(-50%) translateY(-140%);
+    padding: 0.8rem 1.4rem;
+    background: rgba(13, 13, 13, 0.85);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+    font-weight: 600;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 320ms cubic-bezier(0.22, 0.9, 0.32, 1), opacity 320ms ease;
+  }
+
+  .toast.is-visible {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+  }
+
+</style>
+</head>
+<body>
+  <div class="toast" id="toast" role="status" aria-live="polite">
+    <span class="toast__text">Coming soon &mdash; full access launches shortly.</span>
+  </div>
+
+  <div id="landingScreen">
+    <header>
+      <div class="header-inner">
+        <div class="brand">
+          <img src="assets/logo.png" alt="Solle">
+          <span>Solle</span>
+        </div>
+        <button type="button" class="sign-in enter-app-btn">
+          <span class="sign-in__fill"></span>
+          <span class="sign-in__label">Get Started</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="soon-screen">
+      <div class="hero">
+        <div class="hero__eyes" aria-hidden="true">
+          <span class="eye"><span class="eye__lid"></span></span>
+          <span class="eye"><span class="eye__lid"></span></span>
+        </div>
+        <p class="hero__tagline">Earn crypto even while you sleep</p>
+      </div>
+
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <span class="hero-stat__value">$0.00</span>
+          <span class="hero-stat__label">TVL</span>
+        </div>
+        <span class="hero-stats__divider"></span>
+        <div class="hero-stat">
+          <span class="hero-stat__value">0.00%</span>
+          <span class="hero-stat__label">Annual yield</span>
+        </div>
+      </div>
+
+      <button type="button" class="sign-in enter-app-btn">
+        <span class="sign-in__fill"></span>
+        <span class="sign-in__label">Get Started</span>
+      </button>
+    </section>
+
+    <footer class="landing-footer">
+      <div class="landing-footer__inner">
+        <a href="https://x.com/solle_io" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Solle on X">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+        <span class="landing-footer__text">Solle 2026</span>
+      </div>
+    </footer>
+  </div>
+
+  <div id="appScreen" hidden>
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <img src="assets/logo.png" alt="Solle">
+        <span>Solle</span>
+      </div>
+      <a href="#" class="sign-in">
+        <span class="sign-in__fill"></span>
+        <span class="sign-in__label">Log In</span>
+      </a>
+    </div>
+    <nav class="subnav-inner">
+      <span class="nav-pill"></span>
+      <a href="#" class="nav-item active">Portfolio</a>
+      <a href="#" class="nav-item">Earn</a>
+      <a href="#" class="nav-item">Strategy live</a>
+    </nav>
+  </header>
+
+  <main class="earn">
+    <div class="earn-inner">
+      <section>
+        <div class="balance-block">
+          <div class="balance-block__amount" id="balanceAmount">$12,451.21</div>
+          <div class="balance-block__sub">Your stake, <em>compounding</em>.</div>
+        </div>
+
+        <div class="week-head">
+          <h2>&mdash; Earnings</h2>
+          <div class="period-tabs">
+            <span class="period-tabs__pill"></span>
+            <button type="button" class="period-tab active" data-period="7d">7D</button>
+            <button type="button" class="period-tab" data-period="30d">1M</button>
+            <button type="button" class="period-tab" data-period="1y">1Y</button>
+          </div>
+        </div>
+
+        <div class="week-chart">
+          <div class="week-chart__plots"></div>
+          <div class="week-chart__labels"></div>
+        </div>
+
+        <div class="accruals">
+          <div class="week-head">
+            <h2>&mdash; Rewards</h2>
+          </div>
+          <div class="accruals-list" id="accrualsList"></div>
+          <button type="button" class="accruals-more">More</button>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="landing-footer">
+    <div class="landing-footer__inner">
+      <a href="https://x.com/solle_io" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Solle on X">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+      </a>
+      <span class="landing-footer__text">Solle 2026</span>
+    </div>
+  </footer>
+  </div>
+
+  <script>
+    (function () {
+      var landingScreen = document.getElementById('landingScreen');
+      var appScreen = document.getElementById('appScreen');
+      var enterBtns = Array.prototype.slice.call(document.querySelectorAll('.enter-app-btn'));
+      if (!landingScreen || !appScreen || !enterBtns.length) return;
+
+      function showApp() {
+        landingScreen.hidden = true;
+        appScreen.hidden = false;
+      }
+
+      function showLanding() {
+        landingScreen.hidden = false;
+        appScreen.hidden = true;
+      }
+
+      var toast = document.getElementById('toast');
+      var toastTimer;
+
+      enterBtns.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (!toast) return;
+          toast.classList.add('is-visible');
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(function () {
+            toast.classList.remove('is-visible');
+          }, 3200);
+        });
+      });
+
+      window.addEventListener('popstate', function (e) {
+        if (e.state && e.state.screen === 'app') {
+          showApp();
+        } else {
+          showLanding();
+        }
+      });
+
+      if (location.hash === '#app') {
+        showApp();
+        history.replaceState({ screen: 'app' }, '', '#app');
+      } else {
+        history.replaceState({ screen: 'landing' }, '', location.pathname + location.search);
+      }
+    })();
+
+    (function () {
+      var header = document.querySelector('header');
+      if (!header) return;
+
+      function onScroll() {
+        header.classList.toggle('is-scrolled', window.scrollY > 0);
+      }
+
+      window.addEventListener('scroll', onScroll, { passive: true });
+      onScroll();
+    })();
+
+    (function () {
+      var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+      function lastMonthLabels(n) {
+        var now = new Date();
+        var labels = [];
+        for (var i = n - 1; i >= 0; i--) {
+          var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          labels.push(monthNames[d.getMonth()]);
+        }
+        return labels;
+      }
+
+      function lastYearLabels(n) {
+        var now = new Date();
+        var labels = [];
+        for (var i = n - 1; i >= 0; i--) {
+          labels.push(String(now.getFullYear() - i));
+        }
+        return labels;
+      }
+
+      var periodConfig = {
+        '7d': {
+          count: 7,
+          stakedBase: 1000, stakedStep: 60,
+          rewardFactor: 0.014,
+          baseH: 26, spreadH: 56, curve: 1, wiggleAmp: 4, wiggleFreq: 1.3, liveFactor: 0.62,
+          labels: function (n) {
+            var out = [];
+            for (var i = 0; i < n; i++) out.push(String(i + 1).padStart(2, '0'));
+            return out;
+          }
+        },
+        '30d': {
+          count: 7,
+          stakedBase: 1000, stakedStep: 700,
+          rewardFactor: 0.09,
+          baseH: 18, spreadH: 62, curve: 0.85, wiggleAmp: 11, wiggleFreq: 2.1, liveFactor: 0.4,
+          labels: lastMonthLabels
+        },
+        '1y': {
+          count: 7,
+          stakedBase: 1000, stakedStep: 2200,
+          rewardFactor: 0.4,
+          baseH: 12, spreadH: 74, curve: 1.6, wiggleAmp: 2, wiggleFreq: 0.7, liveFactor: 0.8,
+          labels: lastYearLabels
+        }
+      };
+
+      function fmt(n) {
+        return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function buildPeriodData(period) {
+        var c = periodConfig[period];
+        var n = c.count;
+        var labels = c.labels(n);
+        var bars = [];
+        for (var i = 0; i < n; i++) {
+          var t = n > 1 ? i / (n - 1) : 1;
+          var wiggle = Math.sin(i * c.wiggleFreq) * c.wiggleAmp;
+          var isLive = i === n - 1;
+          var h = c.baseH + Math.pow(t, c.curve) * c.spreadH + wiggle;
+          if (isLive) h *= c.liveFactor;
+          h = Math.max(10, Math.min(94, h));
+
+          var staked = c.stakedBase + i * c.stakedStep;
+          var reward = staked * c.rewardFactor * (1 + t * 0.6);
+          if (isLive) reward *= 0.55;
+
+          bars.push({
+            h: h,
+            live: isLive,
+            label: labels[i],
+            reward: reward
+          });
+        }
+        return bars;
+      }
+
+      function livePath(r) {
+        var x1 = 1, y1 = 1, x2 = 99, y2 = 99;
+        return 'M ' + (x1 + r) + ',' + y1 + ' L ' + (x2 - r) + ',' + y1 +
+          ' A ' + r + ',' + r + ' 0 0 1 ' + x2 + ',' + (y1 + r) +
+          ' L ' + x2 + ',' + y2 + ' L ' + x1 + ',' + y2 +
+          ' L ' + x1 + ',' + (y1 + r) +
+          ' A ' + r + ',' + r + ' 0 0 1 ' + (x1 + r) + ',' + y1 + ' Z';
+      }
+
+      function renderChart(period) {
+        var data = buildPeriodData(period);
+        var plotsEl = document.querySelector('.week-chart__plots');
+        var labelsEl = document.querySelector('.week-chart__labels');
+        if (!plotsEl || !labelsEl) return;
+
+        var dense = data.length > 14;
+        plotsEl.classList.toggle('is-dense', dense);
+        labelsEl.classList.toggle('is-dense', dense);
+
+        var radius = data.length <= 7 ? 18 : data.length <= 12 ? 14 : 6;
+        var svgR = data.length <= 7 ? 14 : data.length <= 12 ? 11 : 5;
+
+        var plotsHtml = '';
+        var labelsHtml = '';
+
+        data.forEach(function (bar) {
+          var rectClass = 'bar-rect' + (bar.live ? ' bar-rect--live' : '');
+          var rectStyle = bar.live ? '' : ' style="border-radius:' + radius + 'px ' + radius + 'px 0 0;"';
+          var inner = bar.live
+            ? '<svg class="bar-rect__border" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="' + livePath(svgR) + '"></path></svg>'
+            : '';
+          var rewardLabel = bar.live ? 'Earned so far' : 'Earned';
+
+          plotsHtml += '<div class="bar-plot" style="--h:' + bar.h.toFixed(1) + '%;">' +
+            '<div class="' + rectClass + '"' + rectStyle + '>' + inner + '</div>' +
+            '<div class="bar-tooltip">' +
+            '<span class="bar-tooltip__label">' + rewardLabel + '</span>' +
+            '<span class="bar-tooltip__value">+' + fmt(bar.reward) + ' USDC</span>' +
+            '</div>' +
+            '</div>';
+
+          labelsHtml += '<span>' + (bar.label || '&nbsp;') + '</span>';
+        });
+
+        plotsEl.innerHTML = plotsHtml;
+        labelsEl.innerHTML = labelsHtml;
+      }
+
+      function renderAccruals() {
+        var listEl = document.getElementById('accrualsList');
+        if (!listEl) return;
+        var data = buildPeriodData('7d');
+        var now = new Date();
+        var monthShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        var html = '';
+        for (var i = data.length - 1; i >= 0; i--) {
+          var bar = data[i];
+          var daysAgo = data.length - 1 - i;
+          var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysAgo);
+          var dateStr = monthShort[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+          var statusClass = 'accrual-row__status' + (bar.live ? ' accrual-row__status--pending' : '');
+          var statusText = bar.live ? 'Pending' : 'Paid';
+
+          html += '<div class="accrual-row">' +
+            '<span class="accrual-row__date">' + dateStr + '</span>' +
+            '<span class="accrual-row__right">' +
+            '<span class="accrual-row__amount">+' + fmt(bar.reward) + ' USDC</span>' +
+            '<span class="' + statusClass + '">' + statusText + '</span>' +
+            '</span>' +
+            '</div>';
+        }
+        listEl.innerHTML = html;
+      }
+
+      renderChart('7d');
+      renderAccruals();
+      window.renderEarnChart = renderChart;
+    })();
+
+    (function () {
+      var el = document.getElementById('balanceAmount');
+      if (!el) return;
+
+      function formatValue(v) {
+        return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+
+      function buildOdometer(text) {
+        el.innerHTML = '';
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          if (ch >= '0' && ch <= '9') {
+            var cell = document.createElement('span');
+            cell.className = 'digit-cell';
+            var roll = document.createElement('span');
+            roll.className = 'digit-roll';
+            for (var d = 0; d <= 9; d++) {
+              var s = document.createElement('span');
+              s.textContent = String(d);
+              roll.appendChild(s);
+            }
+            roll.style.transform = 'translateY(-' + parseInt(ch, 10) + 'em)';
+            roll.setAttribute('data-digit', ch);
+            cell.appendChild(roll);
+            el.appendChild(cell);
+          } else {
+            var staticCell = document.createElement('span');
+            staticCell.className = 'digit-cell digit-cell--static';
+            staticCell.textContent = ch;
+            el.appendChild(staticCell);
+          }
+        }
+      }
+
+      function updateOdometer(text) {
+        var cells = el.children;
+        if (cells.length !== text.length) {
+          buildOdometer(text);
+          return;
+        }
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          var cell = cells[i];
+          if (ch >= '0' && ch <= '9') {
+            var roll = cell.querySelector('.digit-roll');
+            if (roll && roll.getAttribute('data-digit') !== ch) {
+              roll.style.transform = 'translateY(-' + parseInt(ch, 10) + 'em)';
+              roll.setAttribute('data-digit', ch);
+            }
+          } else if (cell.textContent !== ch) {
+            cell.textContent = ch;
+          }
+        }
+      }
+
+      var current = 12451.21;
+      buildOdometer(formatValue(current));
+
+      function scheduleNextTick() {
+        var delay = 500 + Math.random() * 1000;
+        setTimeout(function () {
+          var increment = 0.01 + Math.random() * 0.4;
+          current += increment;
+          updateOdometer(formatValue(current));
+          scheduleNextTick();
+        }, delay);
+      }
+
+      scheduleNextTick();
+    })();
+
+    (function () {
+      var nav = document.querySelector('.subnav-inner');
+      var pill = nav.querySelector('.nav-pill');
+      var items = Array.prototype.slice.call(nav.querySelectorAll('.nav-item'));
+
+      function movePill(target, animate) {
+        var navRect = nav.getBoundingClientRect();
+        var itemRect = target.getBoundingClientRect();
+        if (!animate) pill.style.transition = 'none';
+        pill.style.width = itemRect.width + 'px';
+        pill.style.transform = 'translateX(' + (itemRect.left - navRect.left - 16) + 'px)';
+        if (!animate) {
+          pill.getBoundingClientRect();
+          pill.style.transition = '';
+        }
+      }
+
+      items.forEach(function (item) {
+        item.addEventListener('click', function (e) {
+          e.preventDefault();
+          items.forEach(function (i) { i.classList.remove('active'); });
+          item.classList.add('active');
+          movePill(item, true);
+        });
+      });
+
+      window.addEventListener('resize', function () {
+        var active = nav.querySelector('.nav-item.active');
+        movePill(active, false);
+      });
+
+      movePill(nav.querySelector('.nav-item.active'), false);
+    })();
+
+    (function () {
+      var tabs = document.querySelector('.period-tabs');
+      if (!tabs) return;
+      var pill = tabs.querySelector('.period-tabs__pill');
+      var items = Array.prototype.slice.call(tabs.querySelectorAll('.period-tab'));
+
+      function movePill(target, animate) {
+        var tabsRect = tabs.getBoundingClientRect();
+        var itemRect = target.getBoundingClientRect();
+        if (!animate) pill.style.transition = 'none';
+        pill.style.width = itemRect.width + 'px';
+        pill.style.transform = 'translateX(' + (itemRect.left - tabsRect.left - 3.2) + 'px)';
+        if (!animate) {
+          pill.getBoundingClientRect();
+          pill.style.transition = '';
+        }
+      }
+
+      items.forEach(function (item) {
+        item.addEventListener('click', function () {
+          items.forEach(function (i) { i.classList.remove('active'); });
+          item.classList.add('active');
+          movePill(item, true);
+          if (window.renderEarnChart) window.renderEarnChart(item.getAttribute('data-period'));
+        });
+      });
+
+      window.addEventListener('resize', function () {
+        movePill(tabs.querySelector('.period-tab.active'), false);
+      });
+
+      movePill(tabs.querySelector('.period-tab.active'), false);
+    })();
+  </script>
+</body>
+</html>

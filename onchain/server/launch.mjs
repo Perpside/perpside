@@ -8,6 +8,7 @@ import {
   buildFeeTx,
   broadcastFeeTx,
   calculateLaunchFeeLamports,
+  redactSecrets,
   CLUSTER,
 } from './solana.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
@@ -102,7 +103,7 @@ export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, cr
   try {
     await broadcastFeeTx(signedFeeTxBase64);
   } catch (err) {
-    throw new LaunchValidationError('launch fee payment failed: ' + err.message);
+    throw new LaunchValidationError('launch fee payment failed: ' + redactSecrets(err.message));
   }
 
   // From here on the creator has already paid — a thrown error no longer

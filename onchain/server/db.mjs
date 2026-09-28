@@ -76,15 +76,22 @@ export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, po
   `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice, new Date().toISOString());
 }
 
+// error_message is deliberately excluded here — it's a raw internal
+// exception message (can end up carrying RPC error text, occasionally with
+// the RPC URL/API key embedded) meant for server-side debugging only, not
+// for the public, unauthenticated /api/tokens response. `status` alone is
+// enough for the client to know a launch didn't finish cleanly.
+const PUBLIC_TOKEN_COLUMNS = 'mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status, created_at';
+
 export function getToken(mintAddress) {
-  const token = db.prepare('SELECT * FROM tokens WHERE mint_address = ?').get(mintAddress);
+  const token = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE mint_address = ?`).get(mintAddress);
   if (!token) return null;
   const pools = db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(mintAddress);
   return { ...token, pools };
 }
 
 export function listTokens() {
-  const tokens = db.prepare('SELECT * FROM tokens ORDER BY created_at DESC').all();
+  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens ORDER BY created_at DESC`).all();
   return tokens.map((t) => ({
     ...t,
     pools: db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(t.mint_address),

@@ -50,8 +50,13 @@ app.post('/api/launch/fee-tx', async (req, res) => {
     if (err instanceof LaunchValidationError) {
       return res.status(400).json({ error: err.message });
     }
+    // Unlike LaunchValidationError (deliberately user-facing), an
+    // unexpected error's .message is never sent to the client — it can
+    // carry internal details (e.g. the RPC URL, which embeds our API key)
+    // that have no business reaching the browser. Full error stays in the
+    // server logs only.
     console.error(err);
-    res.status(500).json({ error: 'fee-tx failed', detail: err.message });
+    res.status(500).json({ error: 'fee-tx failed' });
   }
 });
 
@@ -67,8 +72,10 @@ app.post('/api/launch', async (req, res) => {
     if (err instanceof LaunchValidationError) {
       return res.status(400).json({ error: err.message });
     }
+    // Same reasoning as /api/launch/fee-tx above — no internal error
+    // detail to the client on an unexpected failure.
     console.error(err);
-    res.status(500).json({ error: 'launch failed', detail: err.message });
+    res.status(500).json({ error: 'launch failed' });
   }
 });
 

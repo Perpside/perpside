@@ -18,6 +18,14 @@ if (!RPC_URL) throw new Error('set RPC_URL (or the legacy DEVNET_RPC_URL) in .en
 
 export const CLMM_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_PROGRAM_ID;
 
+// Some RPC-client error messages embed the request URL, which carries our
+// API key in its query string — strip it before any such message can reach
+// a LaunchValidationError, which is shown verbatim to the client to help
+// them debug a failed transaction (see launch.mjs launchToken()).
+export function redactSecrets(message) {
+  return typeof message === 'string' ? message.split(RPC_URL).join('[rpc]') : message;
+}
+
 // Devnet 0.25%-fee CLMM config, fetched from api-v3-devnet.raydium.io/main/clmm-config.
 const DEVNET_AMM_CONFIG = {
   id: new PublicKey('CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu'),

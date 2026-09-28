@@ -1,3 +1,3 @@
-# Solle
+# Perpside
 
-Landing page and demo dashboard for Solle — earn crypto while you sleep.
+Landing page and demo dashboard for Perpside — earn crypto while you sleep.

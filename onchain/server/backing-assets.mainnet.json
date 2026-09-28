@@ -1,0 +1,8 @@
+{
+  "_verified": true,
+  "_note": "Candidate mainnet mints for Hylo's xSOL/xBTC/xHYPE, gathered 2026-09-29 by cross-referencing Jupiter's token API (matching website=hylo.so, twitter=hylo_so) against docs.hylo.so/product-guide/xassets. Confirmed by the project owner on 2026-09-29 (pasted these exact three addresses back for the record) — launch.mjs now allows CLUSTER=mainnet-beta to load this file.",
+  "_open_question": "Jupiter also lists a separate 'Hylo 3x Leveraged HYPE' token (mint 6YhMKYGY5vPCsRtF1LgesmAfkpUTyTN7fQY2Qp6JaSoL, no website/twitter set) distinct from the 'Hylo Leveraged HYPE' entry below. docs.hylo.so describes xHYPE as a single unified 3x-leveraged product with no separate tiers, which points at the entry below being the real one — but this is inference, not a first-party address confirmation.",
+  "XSOL": { "mint": "4sWNB8zGWHkh6UnmwiEtzNxL4XrN7uK9tosbESbJFfVs", "decimals": 6, "source": "Jupiter token API: name=\"Hylo Leveraged SOL\", website=hylo.so, twitter=hylo_so" },
+  "XBTC": { "mint": "2zCo6bUowJMvr89ajxuWsPadAqJ2F9akCkxumNsSdgsL", "decimals": 6, "source": "Jupiter token API: name=\"Hylo Leveraged BTC\", website=hylo.so, twitter=hylo_so" },
+  "XHYPE": { "mint": "7ga6rtE9qSb3wdEiDCpTu2kHqoGVfT52jD8ign1rYTvx", "decimals": 6, "source": "Jupiter token API: name=\"Hylo Leveraged HYPE\", website=hylo.so, twitter=hylo_so" }
+}

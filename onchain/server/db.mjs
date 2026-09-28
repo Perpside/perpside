@@ -1,0 +1,88 @@
+import { DatabaseSync } from 'node:sqlite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const db = new DatabaseSync(path.join(__dirname, 'perpside.db'));
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS tokens (
+    mint_address TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    image_url TEXT,
+    metadata_uri TEXT,
+    creator_wallet TEXT,
+    first_buy_lamports INTEGER,
+    -- 'minting' -> 'pools_pending' -> 'complete', or 'failed' with
+    -- error_message set. A launch stuck on anything but 'complete' means the
+    -- fee was already collected but the platform hasn't finished its side —
+    -- see launch.mjs launchToken() and docs/token-launch-plan.md.
+    status TEXT NOT NULL DEFAULT 'minting',
+    error_message TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS token_pools (
+    id TEXT PRIMARY KEY,
+    mint_address TEXT NOT NULL REFERENCES tokens(mint_address),
+    backing_asset TEXT NOT NULL,
+    backing_asset_mint TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    position_nft_mint TEXT NOT NULL,
+    tick_lower INTEGER NOT NULL,
+    tick_upper INTEGER NOT NULL,
+    initial_price TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+`);
+
+// node:sqlite has no migration tooling — ALTER TABLE guarded by a pragma
+// check so this stays idempotent across restarts for DBs created before
+// `status`/`error_message` existed.
+const tokenColumns = db.prepare("PRAGMA table_info(tokens)").all().map((c) => c.name);
+if (!tokenColumns.includes('status')) {
+  db.exec("ALTER TABLE tokens ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'");
+}
+if (!tokenColumns.includes('error_message')) {
+  db.exec('ALTER TABLE tokens ADD COLUMN error_message TEXT');
+}
+
+export function insertToken({ mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status }) {
+  db.prepare(`
+    INSERT INTO tokens (mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(mintAddress, name, ticker, imageUrl ?? null, metadataUri ?? null, creatorWallet ?? null, firstBuyLamports ?? null, status ?? 'minting', new Date().toISOString());
+}
+
+export function updateTokenStatus(mintAddress, status, errorMessage) {
+  db.prepare('UPDATE tokens SET status = ?, error_message = ? WHERE mint_address = ?')
+    .run(status, errorMessage ?? null, mintAddress);
+}
+
+export function updateTokenMedia(mintAddress, imageUrl, metadataUri) {
+  db.prepare('UPDATE tokens SET image_url = ?, metadata_uri = ? WHERE mint_address = ?')
+    .run(imageUrl ?? null, metadataUri ?? null, mintAddress);
+}
+
+export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice }) {
+  db.prepare(`
+    INSERT INTO token_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, position_nft_mint, tick_lower, tick_upper, initial_price, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice, new Date().toISOString());
+}
+
+export function getToken(mintAddress) {
+  const token = db.prepare('SELECT * FROM tokens WHERE mint_address = ?').get(mintAddress);
+  if (!token) return null;
+  const pools = db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(mintAddress);
+  return { ...token, pools };
+}
+
+export function listTokens() {
+  const tokens = db.prepare('SELECT * FROM tokens ORDER BY created_at DESC').all();
+  return tokens.map((t) => ({
+    ...t,
+    pools: db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(t.mint_address),
+  }));
+}

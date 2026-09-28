@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Solle</title>
+<title>Perpside</title>
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -68,10 +68,20 @@
     padding: 0.75rem 1rem;
   }
 
+  .earn-inner {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem 3rem;
+  }
+
   .brand {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+  }
+
+  .brand--link {
+    cursor: pointer;
   }
 
   .brand img {
@@ -101,6 +111,10 @@
     border: none;
     cursor: pointer;
     text-decoration: none;
+  }
+
+  .sign-in[hidden] {
+    display: none;
   }
 
   .sign-in__fill {
@@ -147,362 +161,1124 @@
     color: var(--color-bg);
   }
 
-  .subnav-inner {
-    position: relative;
+  .header-right {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 0.5rem 1rem 1rem;
+    gap: 0.6rem;
   }
 
-  .nav-pill {
-    position: absolute;
-    top: 0.5rem;
-    left: 1rem;
-    height: calc(100% - 1.5rem);
-    border-radius: 9999px;
-    background-color: rgba(122, 122, 125, 0.10);
-    transition: transform 300ms cubic-bezier(0.65, 0, 0.35, 1), width 300ms cubic-bezier(0.65, 0, 0.35, 1);
-    z-index: 0;
-  }
-
-  .nav-item {
+  .wallet-wrap {
     position: relative;
-    z-index: 1;
-    border-radius: 9999px;
-    padding: 0.5rem 1.1rem;
-    font-size: 0.9375rem;
-    font-weight: 500;
-    color: var(--color-ink-muted);
-    text-decoration: none;
-    transition: color 200ms ease;
   }
 
-  .nav-item.active {
+  .balance-menu-wrap {
+    position: relative;
+  }
+
+  .balance-menu-wrap::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 2px;
+  }
+
+  .balance-menu {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 150px;
+    padding: 0.35rem;
+    background: rgba(20, 20, 22, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+    transform-origin: top;
+    pointer-events: none;
+    transition: opacity 150ms ease, transform 150ms cubic-bezier(0.22, 0.9, 0.32, 1);
+  }
+
+  .balance-menu-wrap:hover .balance-menu {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .balance-menu__item {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 150ms ease;
+  }
+
+  .balance-menu__item:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .balance-menu__item svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    color: var(--color-ink-muted);
+  }
+
+  .wallet-pill {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 41px;
+    height: 41px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(122, 122, 125, 0.1);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .wallet-pill:hover {
+    background: rgba(122, 122, 125, 0.18);
+  }
+
+  .wallet-pill[hidden] {
+    display: none;
+  }
+
+  .wallet-menu {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    min-width: 170px;
+    padding: 0.35rem;
+    background: rgba(20, 20, 22, 0.45);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 14px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    opacity: 0;
+    transform: translateY(-4px) scale(0.96);
+    transform-origin: top right;
+    pointer-events: none;
+    transition: opacity 150ms ease, transform 150ms cubic-bezier(0.22, 0.9, 0.32, 1);
+  }
+
+  .wallet-menu.is-open {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .wallet-menu__address {
+    padding: 0.5rem 0.6rem 0.65rem;
+    margin-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--color-ink);
+  }
+
+  .wallet-menu__disconnect {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: #ef4444;
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .wallet-menu__disconnect:hover {
+    background: rgba(239, 68, 68, 0.12);
+  }
+
+  .wallet-menu__disconnect svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+
+  .wallet-modal__empty {
+    margin: 0.5rem 0;
+    padding: 1.5rem 0.5rem;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--color-ink-muted);
+  }
+
+  .wallet-modal__empty-link {
     color: var(--color-ink);
     font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--color-hairline);
+    transition: text-decoration-color 150ms ease;
   }
 
-  .earn {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem 1rem 4rem;
+  .wallet-modal__empty-link:hover {
+    text-decoration-color: var(--color-ink);
   }
 
-  .earn-inner {
+  .deposit-qr-warning {
     display: flex;
-    justify-content: center;
-  }
-
-  .earn-inner > section {
-    width: 100%;
-  }
-
-  .balance-block {
-    margin-bottom: 2.5rem;
-  }
-
-  .balance-block__amount {
-    display: inline-flex;
-    align-items: baseline;
-    font-size: 3rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    color: var(--color-ink);
-  }
-
-  .digit-cell {
-    position: relative;
-    display: inline-block;
-    height: 1em;
-    overflow: hidden;
-    vertical-align: baseline;
-  }
-
-  .digit-cell--static {
-    overflow: visible;
-  }
-
-  .digit-roll {
-    display: block;
-    transition: transform 260ms cubic-bezier(0.22, 0.9, 0.32, 1);
-  }
-
-  .digit-roll span {
-    display: block;
-    height: 1em;
-    line-height: 1em;
-    text-align: center;
-  }
-
-  .balance-block__sub {
-    margin-top: 0.4rem;
-    font-size: 1.0625rem;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.75rem 0.85rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    font-size: 0.8125rem;
+    line-height: 1.4;
     color: var(--color-ink-muted);
   }
 
-  .balance-block__sub em {
-    font-style: italic;
+  .deposit-qr-warning img {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+
+  .deposit-qr-warning b {
+    color: var(--color-ink);
+    font-weight: 700;
+  }
+
+  .deposit-qr-image {
+    display: flex;
+    justify-content: center;
+    margin: 1.25rem 0;
+  }
+
+  .deposit-qr-image img {
+    width: 230px;
+    height: 230px;
+    border-radius: 16px;
+    background: #ffffff;
+    padding: 14px;
+  }
+
+  .deposit-qr-address {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 0.9rem;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+  }
+
+  .deposit-qr-address__text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
     color: var(--color-ink);
   }
 
-  .week-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 1rem;
-    flex-wrap: wrap;
+  .wallet-pill__icon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    object-fit: cover;
+    display: block;
   }
 
-  .week-head h2 {
+  .wallet-pill__address {
+    display: none;
+  }
+
+  .wallet-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 200ms ease, visibility 200ms ease;
+  }
+
+  .wallet-modal.is-open {
+    visibility: visible;
+    opacity: 1;
+  }
+
+  .wallet-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .wallet-modal__card {
+    position: relative;
+    width: 100%;
+    max-width: 340px;
+    margin: 1rem;
+    padding: 1.25rem;
+    background: rgba(13, 13, 13, 0.45);
+    backdrop-filter: blur(40px) saturate(180%);
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    transform: scale(0.95) translateY(8px);
+    transition: transform 220ms cubic-bezier(0.22, 0.9, 0.32, 1);
+  }
+
+  .wallet-modal__card--wide {
+    max-width: 420px;
+  }
+
+  .wallet-modal.is-open .wallet-modal__card {
+    transform: scale(1) translateY(0);
+  }
+
+  .wallet-modal__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+
+  .wallet-modal__head h3 {
     margin: 0;
-    font-size: 1.125rem;
+    font-size: 1.0625rem;
     font-weight: 700;
     letter-spacing: -0.01em;
     color: var(--color-ink);
   }
 
-  .period-tabs {
-    position: relative;
+  .wallet-modal__close {
     display: flex;
-    border-radius: 9999px;
-    padding: 0.2rem;
-  }
-
-  .period-tabs__pill {
-    position: absolute;
-    top: 0.2rem;
-    bottom: 0.2rem;
-    border-radius: 9999px;
-    background: rgba(122, 122, 125, 0.2);
-    transition: transform 250ms cubic-bezier(0.65, 0, 0.35, 1), width 250ms cubic-bezier(0.65, 0, 0.35, 1);
-    z-index: 0;
-  }
-
-  .period-tab {
-    position: relative;
-    z-index: 1;
-    padding: 0.4rem 0.85rem;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--color-ink-muted);
-    background: none;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
     border: none;
-    border-radius: 9999px;
+    border-radius: 50%;
+    background: rgba(122, 122, 125, 0.12);
+    color: var(--color-ink-muted);
+    font-size: 1.125rem;
+    line-height: 1;
     cursor: pointer;
-    transition: color 200ms ease;
+    transition: color 200ms ease, background 200ms ease;
   }
 
-  .period-tab.active {
+  .wallet-modal__close:hover {
+    background: rgba(122, 122, 125, 0.2);
     color: var(--color-ink);
   }
 
-  .week-chart {
-    margin-top: 1.5rem;
-  }
-
-  .week-chart__plots {
-    display: flex;
-    align-items: flex-end;
-    gap: 0.6rem;
-    height: 298px;
-    border-bottom: 1px solid var(--color-hairline);
-  }
-
-  @media (max-width: 640px) {
-    .week-chart__plots {
-      gap: 0.35rem;
-    }
-  }
-
-  .week-chart__plots.is-dense {
-    gap: 3px;
-  }
-
-  .week-chart__plots.is-dense .bar-tooltip {
-    padding: 0.5rem 0.8rem;
-  }
-
-  .week-chart__plots.is-dense .bar-tooltip__value {
-    font-size: 0.9375rem;
-  }
-
-  .bar-plot {
-    position: relative;
-    flex: 1 1 0;
-    min-width: 0;
-    height: 100%;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-  }
-
-  .bar-rect {
-    position: relative;
-    width: 100%;
-    height: var(--h, 30%);
-    border: 1.5px solid var(--color-hairline);
-    border-radius: 18px 18px 0 0;
-    background: transparent;
-    transition: border-color 200ms ease;
-  }
-
-  .bar-plot:hover .bar-rect {
-    border-color: var(--color-ink-muted);
-  }
-
-  .bar-tooltip {
-    position: absolute;
-    left: 50%;
-    bottom: calc(var(--h, 30%) + 14px);
-    transform: translateX(-50%) translateY(6px) scale(0.94);
-    transform-origin: bottom center;
+  .wallet-modal__list {
     display: flex;
     flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .wallet-option {
+    display: flex;
     align-items: center;
-    gap: 0.2rem;
-    padding: 0.6rem 1rem;
-    white-space: nowrap;
-    background: rgba(0, 0, 0, 0.32);
-    backdrop-filter: blur(20px) saturate(140%);
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 14px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 0.9, 0.32, 1);
-    z-index: 2;
-  }
-
-  .bar-tooltip::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    bottom: -5px;
-    width: 9px;
-    height: 9px;
-    background: rgba(10, 10, 11, 0.4);
-    border-right: 1px solid rgba(255, 255, 255, 0.1);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    transform: translateX(-50%) rotate(45deg);
-    border-radius: 0 0 2px 0;
-  }
-
-  .bar-plot:first-child .bar-tooltip {
-    left: 0;
-    transform: translateY(6px) scale(0.94);
-    transform-origin: bottom left;
-  }
-
-  .bar-plot:last-child .bar-tooltip {
-    left: auto;
-    right: 0;
-    transform: translateY(6px) scale(0.94);
-    transform-origin: bottom right;
-  }
-
-  .bar-plot:first-child .bar-tooltip::after,
-  .bar-plot:last-child .bar-tooltip::after {
-    display: none;
-  }
-
-  .bar-plot:hover .bar-tooltip {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0) scale(1);
-  }
-
-  .bar-plot:first-child:hover .bar-tooltip,
-  .bar-plot:last-child:hover .bar-tooltip {
-    transform: translateY(0) scale(1);
-  }
-
-  .bar-tooltip__label {
-    font-size: 0.6875rem;
+    gap: 0.75rem;
+    padding: 0.7rem 0.75rem;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.9375rem;
     font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .wallet-option:hover {
+    background: rgba(122, 122, 125, 0.1);
+  }
+
+  .wallet-option img {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+
+  .wallet-modal__footnote {
+    margin: 1.25rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-hairline);
+    text-align: center;
+    font-size: 0.75rem;
+    line-height: 1.5;
     color: var(--color-ink-muted);
   }
 
-  .bar-tooltip__value {
-    font-family: var(--font-mono);
-    font-size: 1.0625rem;
-    font-weight: 700;
-    color: var(--color-pos);
+  .token-search-modal {
+    max-width: 440px;
   }
 
-  .bar-rect--live {
-    border-color: transparent;
-    background: transparent;
+  .token-search {
+    position: relative;
+    margin-bottom: 0.85rem;
   }
 
-  .bar-rect__border {
+  .token-search__icon {
     position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: var(--color-ink-muted);
     pointer-events: none;
-    overflow: visible;
   }
 
-  .bar-rect__border path {
-    fill: none;
-    stroke: var(--color-ink-muted);
-    stroke-width: 1.5;
-    vector-effect: non-scaling-stroke;
-    stroke-dasharray: 6 5;
-    animation: bar-rect-march 0.8s linear infinite;
+  .token-search__input {
+    width: 100%;
+    padding: 0.75rem 0.9rem 0.75rem 2.4rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.9375rem;
+    outline: none;
+    transition: border-color 150ms ease;
   }
 
-  @keyframes bar-rect-march {
-    to { stroke-dashoffset: -22; }
+  .token-search__input::placeholder {
+    color: var(--color-ink-muted);
   }
 
-  .week-chart__labels {
+  .token-search__input:focus {
+    border-color: var(--color-ink-muted);
+  }
+
+  .token-search__results {
     display: flex;
-    gap: 0.6rem;
-    margin-top: 0.6rem;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-height: 88px;
+    max-height: 360px;
+    overflow-y: auto;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
   }
 
-  @media (max-width: 640px) {
-    .week-chart__labels {
-      gap: 0.35rem;
+  .token-search__row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.55rem 0.5rem;
+    border: none;
+    border-radius: 12px;
+    background: none;
+    color: var(--color-ink);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms ease;
+  }
+
+  .token-search__row:hover:not(:disabled) {
+    background: rgba(122, 122, 125, 0.1);
+  }
+
+  .token-search__row:disabled {
+    cursor: default;
+  }
+
+  .token-search__icon-img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .token-search__avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--color-ink);
+    font-size: 0.75rem;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+
+  .token-search__meta {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .token-search__symbol {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+
+  .token-search__name {
+    margin-top: 1px;
+    font-size: 0.75rem;
+    color: var(--color-ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .token-search__added {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+  }
+
+  .token-search__verified {
+    display: inline-flex;
+    color: var(--color-pos);
+    flex-shrink: 0;
+  }
+
+  .token-search__verified svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .token-search__state {
+    padding: 2.25rem 0.5rem;
+    text-align: center;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--color-ink-muted);
+  }
+
+  .launch-back {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 1.5rem;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+
+  .launch-back:hover {
+    color: var(--color-ink);
+  }
+
+  .launch-back svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .how-beta-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 2rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .how-beta-banner__tag {
+    flex-shrink: 0;
+    padding: 0.2rem 0.55rem;
+    border-radius: 9999px;
+    background: var(--color-accent);
+    color: #050505;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .how-beta-banner__text {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--color-ink-muted);
+  }
+
+  .how-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 3rem;
+  }
+
+  .how-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    flex-shrink: 0;
+    width: 200px;
+    position: sticky;
+    top: 88px;
+  }
+
+  .how-nav__item {
+    padding: 0.6rem 0.85rem;
+    border: none;
+    border-radius: 10px;
+    background: none;
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease;
+  }
+
+  .how-nav__item:hover {
+    color: var(--color-ink);
+  }
+
+  .how-nav__item.active {
+    color: var(--color-ink);
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .how-content {
+    flex: 1;
+    min-width: 0;
+    max-width: 640px;
+  }
+
+  .how-section[hidden] {
+    display: none;
+  }
+
+  .how-section h2 {
+    margin: 0 0 1.1rem;
+    font-size: 1.375rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--color-ink);
+  }
+
+  .how-section p {
+    margin: 0 0 1rem;
+    font-size: 0.9375rem;
+    line-height: 1.65;
+    color: var(--color-ink-muted);
+  }
+
+  .how-section b {
+    color: var(--color-ink);
+    font-weight: 600;
+  }
+
+  .how-section ul,
+  .how-section ol {
+    margin: 0 0 1rem;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .how-section li {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--color-ink-muted);
+  }
+
+  @media (max-width: 720px) {
+    .how-layout {
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .how-nav {
+      flex-direction: row;
+      width: 100%;
+      overflow-x: auto;
+      position: static;
+      gap: 0.4rem;
+    }
+
+    .how-nav__item {
+      flex-shrink: 0;
+      white-space: nowrap;
     }
   }
 
-  .week-chart__labels.is-dense {
-    gap: 3px;
+  .explore-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
   }
 
-  .week-chart__labels.is-dense span {
-    font-size: 0.625rem;
+  .explore-search {
+    position: relative;
+    flex: 1 1 220px;
+    max-width: 320px;
   }
 
-  .week-chart__labels span {
-    flex: 1 1 0;
-    min-width: 0;
+  .explore-search__icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    color: var(--color-ink-muted);
+    pointer-events: none;
+  }
+
+  .explore-search__input {
+    width: 100%;
+    padding: 0.65rem 0.9rem 0.65rem 2.4rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .explore-search__input::placeholder {
+    color: var(--color-ink-muted);
+  }
+
+  .explore-search__input:focus {
+    border-color: var(--color-ink-muted);
+  }
+
+  .explore-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .explore-filter {
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .explore-filter:hover {
+    color: var(--color-ink);
+  }
+
+  .explore-filter.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #050505;
+  }
+
+  .explore-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(198px, 1fr));
+    gap: 1rem;
+    margin-top: 1.75rem;
+  }
+
+  .explore-empty {
+    margin: 3rem 0 0;
     text-align: center;
+    font-size: 0.875rem;
+    color: var(--color-ink-muted);
+  }
+
+  .explore-empty[hidden] {
+    display: none;
+  }
+
+  .explore-card {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 18px;
+    background: var(--color-card);
+    overflow: hidden;
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: transform 150ms ease, border-color 150ms ease;
+  }
+
+  .explore-card:hover {
+    border-color: var(--color-ink-muted);
+    transform: translateY(-2px);
+  }
+
+  .explore-card__media {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+  }
+
+  .explore-card__cap {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 0.25rem 0.55rem;
+    border-radius: 9999px;
+    background: rgba(5, 5, 5, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .explore-card__cap-label {
+    font-size: 1.1em;
+    font-weight: inherit;
+    color: var(--color-ink-muted);
+  }
+
+  .explore-card__position {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: flex;
+    align-items: center;
+    padding: 0.25rem;
+    border-radius: 9999px;
+    background: rgba(5, 5, 5, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .explore-card__position-asset {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1.5px solid rgba(20, 20, 20, 0.9);
+  }
+
+  .explore-card__position-asset + .explore-card__position-asset {
+    margin-left: -6px;
+  }
+
+  .explore-card__position {
+    cursor: default;
+  }
+
+  .token-tooltip {
+    position: fixed;
+    z-index: 500;
+    width: max-content;
+    max-width: 220px;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(13, 13, 13, 0.98);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+    pointer-events: none;
+  }
+
+  .token-tooltip.is-visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  .token-tooltip__assets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 0.55rem;
+  }
+
+  .token-tooltip__asset {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--color-ink);
+  }
+
+  .token-tooltip__asset img {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+
+  .token-tooltip__divider {
+    height: 1px;
+    margin: 0.45rem 0;
+    background: var(--color-hairline);
+  }
+
+  .token-tooltip__rows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.6rem;
+  }
+
+  .token-tooltip__stat {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    color: var(--color-ink-muted);
+  }
+
+  .token-tooltip__stat b {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .token-tooltip__empty {
     font-size: 0.75rem;
     color: var(--color-ink-muted);
   }
 
-  .accruals {
-    margin-top: 3rem;
+  .explore-card__info {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 0.4rem;
+    padding: 12px 10px;
+    background: linear-gradient(to top, rgba(2, 2, 2, 0.9) 0%, rgba(2, 2, 2, 0.55) 60%, transparent 100%);
   }
 
-  .accruals-list {
-    margin-top: 1rem;
+  .explore-card__text {
+    min-width: 0;
+    overflow: hidden;
   }
 
-  .accruals-more {
+  .explore-card__socials {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+
+  .explore-card__social {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.14);
+    color: var(--color-ink-muted);
+    text-decoration: none;
+    transition: color 150ms ease, background 150ms ease;
+  }
+
+  .explore-card__social:hover {
+    color: var(--color-ink);
+    background: rgba(255, 255, 255, 0.24);
+  }
+
+  .explore-card__social svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .explore-card__name {
+    overflow: hidden;
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--color-ink);
+    text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .explore-card__ticker {
     display: block;
-    margin: 1rem auto 0;
-    padding: 0.5rem 0;
+    margin-top: 0.2rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+    text-transform: uppercase;
+  }
+
+  .header-launch-btn {
+    border: none;
+    background: none;
+    padding: 0;
+    margin-right: 4px;
+    font-family: inherit;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    transition: color 150ms ease;
+  }
+
+  .header-launch-btn:hover {
+    color: var(--color-ink);
+  }
+
+  .launch-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .launch-row .launch-card {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .launch-preview {
+    flex-shrink: 0;
+    width: 240px;
+  }
+
+  .launch-preview__label {
+    display: block;
+    margin-bottom: 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+  }
+
+  .launch-preview__grid {
+    grid-template-columns: 1fr;
+    width: 240px;
+    margin-top: 0;
+  }
+
+  @media (max-width: 720px) {
+    .launch-row {
+      flex-direction: column;
+    }
+
+    .launch-preview {
+      width: 100%;
+    }
+
+    .launch-preview__grid {
+      width: 100%;
+      max-width: 260px;
+    }
+  }
+
+  .launch-form {
+    max-width: 780px;
+    margin: 0 auto;
+  }
+
+  .launch-form__title {
+    margin: 0 0 0.35rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+
+  .launch-form__subtitle {
+    margin: 0 0 2rem;
+    font-size: 0.9375rem;
+    color: var(--color-ink-muted);
+  }
+
+  .launch-card {
+    padding: 1.5rem;
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: 18px;
+  }
+
+  .launch-field {
+    margin-bottom: 1.25rem;
+  }
+
+  .launch-field--row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+  }
+
+  .launch-links-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0;
     border: none;
     background: none;
     color: var(--color-ink-muted);
@@ -510,52 +1286,312 @@
     font-size: 0.8125rem;
     font-weight: 600;
     cursor: pointer;
-    transition: color 200ms ease;
+    transition: color 150ms ease;
   }
 
-  .accruals-more:hover {
+  .launch-links-toggle:hover {
     color: var(--color-ink);
   }
 
-  .accrual-row {
+  .launch-links-toggle svg {
+    width: 16px;
+    height: 16px;
+    transition: transform 200ms ease;
+  }
+
+  .launch-links-toggle.is-open svg {
+    transform: rotate(180deg);
+  }
+
+  .launch-links-panel {
+    margin-top: 1rem;
+  }
+
+  .launch-links-panel[hidden] {
+    display: none;
+  }
+
+  .launch-label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .launch-label__optional {
+    font-weight: 700;
+    font-size: 0.6875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .launch-input {
+    width: 100%;
+    padding: 0.7rem 0.9rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    color: var(--color-ink);
+    font-family: inherit;
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 150ms ease;
+  }
+
+  .launch-input::placeholder {
+    color: var(--color-ink-muted);
+  }
+
+  .launch-input:focus {
+    border-color: var(--color-ink-muted);
+  }
+
+  .launch-input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  .launch-input[type="number"]::-webkit-inner-spin-button,
+  .launch-input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  .launch-image-picker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 88px;
+    height: 88px;
+    border: 1px dashed var(--color-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    overflow: hidden;
+    transition: border-color 150ms ease, color 150ms ease;
+  }
+
+  .launch-image-picker:hover {
+    border-color: var(--color-ink-muted);
+    color: var(--color-ink);
+  }
+
+  .launch-image-picker__placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+  }
+
+  .launch-image-picker__placeholder[hidden] {
+    display: none;
+  }
+
+  .launch-image-picker__placeholder svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .launch-image-picker__preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .launch-image-picker__preview[hidden] {
+    display: none;
+  }
+
+  .launch-asset-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .launch-asset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--color-border);
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .launch-asset img {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+  }
+
+  .launch-asset:hover {
+    color: var(--color-ink);
+  }
+
+  .launch-asset.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #050505;
+  }
+
+  .launch-asset--disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .launch-asset-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .launch-asset-add svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .launch-asset-add:hover {
+    color: var(--color-ink);
+    border-color: var(--color-ink-muted);
+  }
+
+  .launch-asset-add--disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+  }
+
+  .launch-asset__avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.16);
+    font-size: 0.5625rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .launch-toggle {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+
+  .launch-toggle__item {
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--color-ink-muted);
+    font-family: inherit;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .launch-toggle__item:hover {
+    color: var(--color-ink);
+  }
+
+  .launch-toggle__item.active {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    color: #050505;
+  }
+
+  .reward-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    padding: 0.85rem 0;
-    font-size: 0.875rem;
-  }
-
-  .accrual-row__date {
-    color: var(--color-ink-muted);
-  }
-
-  .accrual-row__right {
-    display: flex;
-    align-items: center;
     gap: 0.75rem;
+    margin-top: 0.75rem;
   }
 
-  .accrual-row__amount {
-    font-family: var(--font-mono);
-    font-weight: 600;
-    color: var(--color-pos);
+  .reward-row[hidden] {
+    display: none;
   }
 
-  .accrual-row__status {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.2rem 0.6rem;
-    border-radius: 9999px;
+  .reward-row__label {
+    font-size: 0.8125rem;
     color: var(--color-ink-muted);
-    background: rgba(122, 122, 125, 0.12);
-    white-space: nowrap;
   }
 
-  .accrual-row__status--pending {
-    color: var(--color-pos);
-    background: rgba(45, 212, 191, 0.12);
+  .reward-row__value {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink);
   }
+
+  .launch-range {
+    width: 100%;
+    margin-top: 0.4rem;
+    accent-color: var(--color-accent);
+  }
+
+  .launch-range[hidden] {
+    display: none;
+  }
+
+  .launch-error {
+    margin: 0 0 1rem;
+    font-size: 0.8125rem;
+    color: var(--color-neg);
+  }
+
+  .launch-error[hidden] {
+    display: none;
+  }
+
+  .launch-submit {
+    display: flex;
+    width: 50%;
+    justify-content: center;
+  }
+
+  .add-asset-submit {
+    display: flex;
+    width: 100%;
+    justify-content: center;
+    margin-top: 0.25rem;
+  }
+
+  .add-asset-submit:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  @media (max-width: 520px) {
+    .launch-field--row {
+      grid-template-columns: 1fr;
+    }
+  }
+
 
   #landingScreen {
     min-height: 100vh;
@@ -565,6 +1601,24 @@
 
   #landingScreen[hidden] {
     display: none;
+  }
+
+  #appScreen {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #appScreen[hidden] {
+    display: none;
+  }
+
+  #appScreen main.earn {
+    flex: 1;
+  }
+
+  #appScreen .landing-footer {
+    margin-top: 32px;
   }
 
   .soon-screen {
@@ -624,12 +1678,28 @@
 
   .hero__tagline {
     margin: 0;
-    max-width: 320px;
+    max-width: 480px;
     font-size: 1.75rem;
     font-weight: 700;
     letter-spacing: -0.01em;
     line-height: 1.2;
     color: var(--color-ink);
+  }
+
+  .hero__copy {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .hero__subtext {
+    margin: 0;
+    max-width: 440px;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--color-ink-muted);
   }
 
   .hero-stats {
@@ -662,8 +1732,39 @@
 
   .hero-stats__divider {
     width: 1px;
-    height: 32px;
+    height: 19px;
     background: var(--color-hairline);
+  }
+
+  .hero-stat--brand {
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+
+  .hero-stat__logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    border-radius: 50%;
+  }
+
+  .hero-stat__logo--sm {
+    width: 19px;
+    height: 19px;
+  }
+
+  .hero-stat--brand .hero-stat__label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--color-ink);
+  }
+
+  .hero-stats__powered-by {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
   }
 
   .landing-footer__inner {
@@ -687,55 +1788,37 @@
     color: var(--color-ink);
   }
 
-  .landing-footer__text {
+  .landing-footer__links {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .landing-footer__link {
     font-size: 0.875rem;
     color: var(--color-ink-muted);
+    text-decoration: none;
+    transition: color 200ms ease;
   }
 
-  .toast {
-    position: fixed;
-    top: 1.25rem;
-    left: 50%;
-    z-index: 100;
-    transform: translateX(-50%) translateY(-140%);
-    padding: 0.8rem 1.4rem;
-    background: rgba(13, 13, 13, 0.85);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 9999px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  .landing-footer__link:hover {
     color: var(--color-ink);
-    font-size: 0.875rem;
-    font-weight: 600;
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition: transform 320ms cubic-bezier(0.22, 0.9, 0.32, 1), opacity 320ms ease;
   }
 
-  .toast.is-visible {
-    transform: translateX(-50%) translateY(0);
-    opacity: 1;
-  }
 
 </style>
 </head>
 <body>
-  <div class="toast" id="toast" role="status" aria-live="polite">
-    <span class="toast__text">Coming soon &mdash; full access launches shortly.</span>
-  </div>
-
   <div id="landingScreen">
     <header>
       <div class="header-inner">
         <div class="brand">
-          <img src="assets/logo.png" alt="Solle">
-          <span>Solle</span>
+          <img src="assets/logo.png" alt="Perpside">
+          <span>Perpside</span>
         </div>
         <button type="button" class="sign-in enter-app-btn">
           <span class="sign-in__fill"></span>
-          <span class="sign-in__label">Get Started</span>
+          <span class="sign-in__label">Explore</span>
         </button>
       </div>
     </header>
@@ -746,33 +1829,44 @@
           <span class="eye"><span class="eye__lid"></span></span>
           <span class="eye"><span class="eye__lid"></span></span>
         </div>
-        <p class="hero__tagline">Earn crypto even while you sleep</p>
+        <div class="hero__copy">
+          <p class="hero__tagline">Launch a coin paired with anything<br>or with multiple assets at once</p>
+          <p class="hero__subtext">Every coin earns trading fees from the assets it's paired with</p>
+        </div>
       </div>
 
       <div class="hero-stats">
-        <div class="hero-stat">
-          <span class="hero-stat__value">$0.00</span>
-          <span class="hero-stat__label">TVL</span>
+        <span class="hero-stats__powered-by">Powered by</span>
+        <div class="hero-stat hero-stat--brand">
+          <img src="assets/solana.png" alt="Solana" class="hero-stat__logo">
+          <span class="hero-stat__label">Solana</span>
         </div>
         <span class="hero-stats__divider"></span>
-        <div class="hero-stat">
-          <span class="hero-stat__value">0.00%</span>
-          <span class="hero-stat__label">Annual yield</span>
+        <div class="hero-stat hero-stat--brand">
+          <img src="assets/jupiter.png" alt="Jupiter" class="hero-stat__logo hero-stat__logo--sm">
+          <span class="hero-stat__label">Jupiter</span>
+        </div>
+        <span class="hero-stats__divider"></span>
+        <div class="hero-stat hero-stat--brand">
+          <img src="assets/raydium.png" alt="Raydium" class="hero-stat__logo hero-stat__logo--sm">
+          <span class="hero-stat__label">Raydium</span>
         </div>
       </div>
 
-      <button type="button" class="sign-in enter-app-btn">
+      <button type="button" class="sign-in enter-app-btn" id="heroLaunchBtn">
         <span class="sign-in__fill"></span>
-        <span class="sign-in__label">Get Started</span>
+        <span class="sign-in__label">Launch coin</span>
       </button>
     </section>
 
     <footer class="landing-footer">
       <div class="landing-footer__inner">
-        <a href="https://x.com/solle_io" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Solle on X">
+        <a href="https://x.com/perpside" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Perpside on X">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
         </a>
-        <span class="landing-footer__text">Solle 2026</span>
+        <div class="landing-footer__links">
+          <a href="#" class="landing-footer__link" id="howItWorksLandingLink">How it work</a>
+        </div>
       </div>
     </footer>
   </div>
@@ -780,68 +1874,355 @@
   <div id="appScreen" hidden>
   <header>
     <div class="header-inner">
-      <div class="brand">
-        <img src="assets/logo.png" alt="Solle">
-        <span>Solle</span>
+      <div class="brand brand--link" id="appBrandLogo" role="button" tabindex="0">
+        <img src="assets/logo.png" alt="Perpside">
+        <span>Perpside</span>
       </div>
-      <a href="#" class="sign-in">
-        <span class="sign-in__fill"></span>
-        <span class="sign-in__label">Log In</span>
-      </a>
+      <div class="header-right">
+        <div class="balance-menu-wrap">
+          <div class="balance-menu" id="balanceMenu">
+            <button type="button" class="balance-menu__item" id="balanceMenuDeposit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+              Deposit
+            </button>
+            <button type="button" class="balance-menu__item" id="balanceMenuWithdraw">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9"/><path d="M7 14l5-5 5 5"/><path d="M5 3h14"/></svg>
+              Withdraw
+            </button>
+          </div>
+        </div>
+        <button type="button" class="header-launch-btn" id="headerLaunchBtn">Launch coin</button>
+        <div class="wallet-wrap">
+          <button type="button" class="sign-in" id="connectWalletBtn">
+            <span class="sign-in__fill"></span>
+            <span class="sign-in__label">Log In</span>
+          </button>
+          <button type="button" class="wallet-pill" id="walletPill" hidden>
+            <img src="" alt="" class="wallet-pill__icon" id="walletPillIcon">
+            <span class="wallet-pill__address" id="walletPillAddress"></span>
+          </button>
+        </div>
+      </div>
     </div>
-    <nav class="subnav-inner">
-      <span class="nav-pill"></span>
-      <a href="#" class="nav-item active">Portfolio</a>
-      <a href="#" class="nav-item">Earn</a>
-      <a href="#" class="nav-item">Strategy live</a>
-    </nav>
   </header>
+
+  <div class="wallet-menu" id="walletMenu">
+    <div class="wallet-menu__address" id="walletMenuAddress"></div>
+    <button type="button" class="wallet-menu__disconnect" id="disconnectWalletBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v8"/>
+        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+      </svg>
+      Disconnect
+    </button>
+  </div>
 
   <main class="earn">
     <div class="earn-inner">
-      <section>
-        <div class="balance-block">
-          <div class="balance-block__amount" id="balanceAmount">$12,451.21</div>
-          <div class="balance-block__sub">Your stake, <em>compounding</em>.</div>
-        </div>
+      <section class="page" id="page-earn">
+        <div class="explore-toolbar">
+          <div class="explore-search">
+            <svg class="explore-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input type="text" id="exploreSearchInput" class="explore-search__input" placeholder="Search tokens" autocomplete="off">
+          </div>
 
-        <div class="week-head">
-          <h2>&mdash; Earnings</h2>
-          <div class="period-tabs">
-            <span class="period-tabs__pill"></span>
-            <button type="button" class="period-tab active" data-period="7d">7D</button>
-            <button type="button" class="period-tab" data-period="30d">1M</button>
-            <button type="button" class="period-tab" data-period="1y">1Y</button>
+          <div class="explore-filters" id="exploreFilters">
+            <button type="button" class="explore-filter active" data-filter="trending">Trending</button>
+            <button type="button" class="explore-filter" data-filter="new">New</button>
+            <button type="button" class="explore-filter" data-filter="top">Top</button>
           </div>
         </div>
 
-        <div class="week-chart">
-          <div class="week-chart__plots"></div>
-          <div class="week-chart__labels"></div>
-        </div>
+        <div class="explore-grid" id="exploreGrid"></div>
+        <p class="explore-empty" id="exploreEmpty" hidden>No tokens found.</p>
+      </section>
 
-        <div class="accruals">
-          <div class="week-head">
-            <h2>&mdash; Rewards</h2>
+      <section class="page" id="page-portfolio" hidden>
+        <button type="button" class="launch-back" id="launchBackBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Back
+        </button>
+
+        <div class="launch-form">
+          <h2 class="launch-form__title">Launch a coin</h2>
+          <p class="launch-form__subtitle">Back it with a leveraged position and start earning fees.</p>
+
+          <div class="launch-row">
+            <form id="launchTokenForm" class="launch-card">
+              <div class="launch-field">
+                <label class="launch-label">Coin image</label>
+                <label class="launch-image-picker" id="launchImagePicker" for="launchImageInput">
+                  <input type="file" id="launchImageInput" accept="image/*" hidden>
+                  <span class="launch-image-picker__placeholder" id="launchImagePlaceholder">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 21h14"/></svg>
+                    Upload
+                  </span>
+                  <img class="launch-image-picker__preview" id="launchImagePreview" alt="" hidden>
+                </label>
+              </div>
+
+              <div class="launch-field">
+                <label class="launch-label" for="launchName">Coin name</label>
+                <input type="text" id="launchName" class="launch-input" placeholder="e.g. Solar Flare" maxlength="32" required autocomplete="off">
+              </div>
+
+              <div class="launch-field">
+                <label class="launch-label" for="launchTicker">Ticker</label>
+                <input type="text" id="launchTicker" class="launch-input" placeholder="e.g. FLARE" maxlength="10" required autocomplete="off">
+              </div>
+
+              <div class="launch-field">
+                <button type="button" class="launch-links-toggle" id="launchLinksToggle">
+                  <span>Add links <span class="launch-label__optional">optional</span></span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+
+                <div class="launch-links-panel launch-field--row" id="launchLinksPanel" hidden>
+                  <div>
+                    <label class="launch-label" for="launchX">X <span class="launch-label__optional">optional</span></label>
+                    <input type="text" id="launchX" class="launch-input" placeholder="@handle" autocomplete="off">
+                  </div>
+                  <div>
+                    <label class="launch-label" for="launchTelegram">Telegram <span class="launch-label__optional">optional</span></label>
+                    <input type="text" id="launchTelegram" class="launch-input" placeholder="@handle" autocomplete="off">
+                  </div>
+                  <div>
+                    <label class="launch-label" for="launchWebsite">Website <span class="launch-label__optional">optional</span></label>
+                    <input type="text" id="launchWebsite" class="launch-input" placeholder="yoursite.com" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+
+              <div class="launch-field">
+                <label class="launch-label">Backing assets</label>
+                <div class="launch-asset-grid" id="launchAssetGrid">
+                  <button type="button" class="launch-asset active" data-asset="XSOL"><img src="assets/xsol.png" alt="">xSOL</button>
+                  <button type="button" class="launch-asset" data-asset="XBTC"><img src="assets/xbtc.png" alt="">xBTC</button>
+                  <button type="button" class="launch-asset" data-asset="XHYPE"><img src="assets/xhype.png" alt="">xHYPE</button>
+                  <button type="button" class="launch-asset-add" id="launchAssetAddBtn" aria-label="Add custom asset">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="launch-field">
+                <label class="launch-label">Reward model</label>
+                <div class="launch-toggle" id="launchReward">
+                  <button type="button" class="launch-toggle__item active" data-reward="community">Community</button>
+                  <button type="button" class="launch-toggle__item" data-reward="creator">Creator</button>
+                  <button type="button" class="launch-toggle__item" data-reward="buyback">Buyback &amp; Burn</button>
+                </div>
+
+                <div class="reward-row" id="communityFeeRow">
+                  <span class="reward-row__label">Community reward — paid to every holder</span>
+                  <span class="reward-row__value" id="communityFeeValue">3%</span>
+                </div>
+                <input type="range" class="launch-range" id="communityFeeSlider" min="0.1" max="2" step="0.1" value="2" hidden>
+
+                <div class="reward-row" id="creatorFeeRow" hidden>
+                  <span class="reward-row__label">Creator reward — paid to you</span>
+                  <span class="reward-row__value" id="creatorFeeValue">1%</span>
+                </div>
+                <input type="range" class="launch-range" id="creatorFeeSlider" min="0.1" max="1" step="0.1" value="1" hidden>
+
+                <div class="reward-row" id="buybackFeeRow" hidden>
+                  <span class="reward-row__label">Buyback &amp; Burn — buys back and burns supply</span>
+                  <span class="reward-row__value" id="buybackFeeValue">1%</span>
+                </div>
+                <input type="range" class="launch-range" id="buybackFeeSlider" min="0.1" max="1" step="0.1" value="1" hidden>
+              </div>
+
+              <div class="launch-field">
+                <button type="button" class="launch-links-toggle" id="launchFirstBuyToggle">
+                  <span>First buy <span class="launch-label__optional">optional</span></span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+
+                <div class="launch-links-panel" id="launchFirstBuyPanel" hidden>
+                  <label class="launch-label" for="launchFirstBuyAmount">Amount (SOL)</label>
+                  <input type="number" id="launchFirstBuyAmount" class="launch-input" placeholder="0.0" min="0" step="0.01" inputmode="decimal" autocomplete="off">
+                </div>
+              </div>
+
+              <p class="launch-error" id="launchError" hidden></p>
+
+              <button type="submit" class="sign-in launch-submit" id="launchSubmitBtn">
+                <span class="sign-in__fill"></span>
+                <span class="sign-in__label" id="launchSubmitLabel">Launch coin</span>
+              </button>
+            </form>
+
+            <div class="launch-preview">
+              <span class="launch-preview__label">Preview</span>
+              <div class="explore-grid launch-preview__grid" id="launchPreviewGrid"></div>
+            </div>
           </div>
-          <div class="accruals-list" id="accrualsList"></div>
-          <button type="button" class="accruals-more">More</button>
         </div>
       </section>
+
+      <section class="page" id="page-how" hidden>
+        <button type="button" class="launch-back" id="howBackBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Back
+        </button>
+
+        <div class="how-beta-banner">
+          <span class="how-beta-banner__tag">Beta</span>
+          <span class="how-beta-banner__text">Perpside is in active beta. Mechanics, fees, and supported assets may change as the protocol evolves &mdash; use at your own risk.</span>
+        </div>
+
+        <div class="how-layout">
+          <nav class="how-nav">
+            <button type="button" class="how-nav__item active" data-section="overview">Overview</button>
+            <button type="button" class="how-nav__item" data-section="launching">Launching a Coin</button>
+            <button type="button" class="how-nav__item" data-section="fees">Reward Model &amp; Fees</button>
+            <button type="button" class="how-nav__item" data-section="trading">Trading &amp; Wallet</button>
+            <button type="button" class="how-nav__item" data-section="risk">Risk &amp; Disclaimers</button>
+          </nav>
+
+          <div class="how-content">
+            <div class="how-section" data-section="overview">
+              <h2>Overview</h2>
+              <p>Perpside is a launchpad for coins backed by real assets. When you launch a coin, you choose up to three backing assets &mdash; the built&#8209;in Hylo leveraged tokens (xSOL, xBTC, xHYPE) or any token on Solana &mdash; and a reward model that routes a share of every trade to holders, to you as the creator, or into an automatic buyback &amp; burn.</p>
+              <p>Every coin is a normal SPL token from the moment it launches. It can be bought, sold, and held anywhere Solana tokens are supported &mdash; Perpside just gives it a home, a live price chart, and a fee engine.</p>
+            </div>
+
+            <div class="how-section" data-section="launching" hidden>
+              <h2>Launching a Coin</h2>
+              <p>Launching takes one form, filled out in a few steps:</p>
+              <ol>
+                <li><b>Identity</b> &mdash; upload an image, and set a name and ticker.</li>
+                <li><b>Backing assets</b> &mdash; pick 1&ndash;3 assets from xSOL, xBTC, and xHYPE, or search any Solana token by name, symbol, or mint address and add it to the mix.</li>
+                <li><b>Reward model</b> &mdash; turn on Community, Creator, Buyback &amp; Burn, or any combination, and set each one's fee within its cap.</li>
+                <li><b>First buy</b> (optional) &mdash; set an amount to buy immediately at launch, seeding the initial price and supply.</li>
+                <li><b>Links</b> (optional) &mdash; attach an X account, Telegram, and website so traders can find the community.</li>
+              </ol>
+              <p>Once submitted, the coin appears instantly in Explore, ready to trade.</p>
+            </div>
+
+            <div class="how-section" data-section="fees" hidden>
+              <h2>Reward Model &amp; Fees</h2>
+              <p>Every coin's total trading fee is capped at <b>3%</b>, split across up to three destinations. At least one must be enabled:</p>
+              <ul>
+                <li><b>Community</b> &mdash; paid directly to every holder's wallet in proportion to their balance. Fixed at 3% when it's the only reward enabled; otherwise adjustable down to make room for the others.</li>
+                <li><b>Creator</b> &mdash; paid to the coin's creator. Capped at 1%, regardless of what else is enabled.</li>
+                <li><b>Buyback &amp; Burn</b> &mdash; used to buy the coin back from the market and burn it, permanently reducing supply. Capped at 1%.</li>
+              </ul>
+              <p>With all three enabled, each is capped at 1% &mdash; still summing to the same 3% ceiling. There's no separate "fee tier" to pick; the model is whatever combination of the three the creator configures at launch, and it's visible on&#8209;chain to every trader.</p>
+              <p>Rewards are distributed automatically &mdash; there's <b>no claiming</b>. Fees accumulate in the coin's reward pool as it trades, and every time the pool reaches <b>$10,000</b>, it's automatically paid out: Community rewards land directly in holders' wallets, Creator fees are sent to the creator, and any Buyback &amp; Burn allocation executes on&#8209;chain. Simply holding the coin is enough &mdash; there's nothing to do and nothing to sign.</p>
+            </div>
+
+            <div class="how-section" data-section="trading" hidden>
+              <h2>Trading &amp; Wallet</h2>
+              <p>The <b>Explore</b> page lists every coin launched on Perpside, sorted by Trending, New, or Top market cap, with search by name or ticker.</p>
+              <p>To trade, connect any Solana wallet that supports the Wallet Standard &mdash; Phantom, Jupiter, Backpack, Solflare, and others are detected automatically. Once connected, deposit USDC to your Perpside balance to start trading, and withdraw at any time; your keys never leave your wallet.</p>
+            </div>
+
+            <div class="how-section" data-section="risk" hidden>
+              <h2>Risk &amp; Disclaimers</h2>
+              <p>Coins backed by xSOL, xBTC, or xHYPE carry leveraged exposure to their underlying asset &mdash; their price can move sharply in either direction, faster than the underlying asset itself. Coins backed by other tokens carry that token's own volatility.</p>
+              <p>Perpside is beta software. Contracts, fee mechanics, and supported assets can change, and bugs are possible despite testing. Only trade or launch with funds you're prepared to lose, and always verify a coin's backing assets and reward model before trading it.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
     </div>
   </main>
 
   <footer class="landing-footer">
     <div class="landing-footer__inner">
-      <a href="https://x.com/solle_io" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Solle on X">
+      <a href="https://x.com/perpside" target="_blank" rel="noopener" class="landing-footer__x" aria-label="Perpside on X">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
       </a>
-      <span class="landing-footer__text">Solle 2026</span>
+      <div class="landing-footer__links">
+        <a href="#" class="landing-footer__link" id="howItWorksAppLink">How it work</a>
+      </div>
     </div>
   </footer>
+
+  <div class="wallet-modal" id="walletModal">
+    <div class="wallet-modal__backdrop" id="walletModalBackdrop"></div>
+    <div class="wallet-modal__card" role="dialog" aria-modal="true" aria-label="Log in">
+      <div class="wallet-modal__head">
+        <h3>Log in</h3>
+        <button type="button" class="wallet-modal__close" id="walletModalClose" aria-label="Close">&times;</button>
+      </div>
+      <div class="wallet-modal__list" id="walletModalList">
+        <p class="wallet-modal__empty">No Solana wallets detected. Install <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Phantom</a>, <a href="https://jup.ag/wallet" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Jupiter</a>, or <a href="https://backpack.app" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Backpack</a>.</p>
+      </div>
+
+      <p class="wallet-modal__footnote">Your keys, your coins — Perpside never has access to your wallet.</p>
+    </div>
+  </div>
+
+  <div class="wallet-modal" id="depositQrModal">
+    <div class="wallet-modal__backdrop" id="depositQrModalBackdrop"></div>
+    <div class="wallet-modal__card wallet-modal__card--wide" role="dialog" aria-modal="true" aria-label="Deposit USDC">
+      <div class="wallet-modal__head">
+        <h3>Deposit USDC</h3>
+        <button type="button" class="wallet-modal__close" id="depositQrModalClose" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="deposit-qr-warning">
+        <img src="assets/usdc.svg" alt="">
+        <span>Only send <b>USDC</b> to this address on the <b>Solana</b> network. Sending other assets or using another network may result in permanent loss of funds.</span>
+      </div>
+
+      <div class="deposit-qr-image">
+        <img src="assets/qr-fake.png" alt="Wallet address QR code">
+      </div>
+
+      <div class="deposit-qr-address">
+        <span class="deposit-qr-address__text" id="depositQrAddress">8xJk4mPzQVWn2LrTuY6bDfHsCigNjXeoZaK9pRcMtBvA</span>
+        <button type="button" class="wallet-menu__copy" id="depositQrCopyBtn">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="wallet-modal" id="addAssetModal">
+    <div class="wallet-modal__backdrop" id="addAssetModalBackdrop"></div>
+    <div class="wallet-modal__card token-search-modal" role="dialog" aria-modal="true" aria-label="Add asset">
+      <div class="wallet-modal__head">
+        <h3>Add asset</h3>
+        <button type="button" class="wallet-modal__close" id="addAssetModalClose" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="token-search">
+        <svg class="token-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="text" id="addAssetInput" class="token-search__input" placeholder="Search name, symbol, or paste a mint address" autocomplete="off">
+      </div>
+
+      <div class="token-search__results" id="addAssetResults"></div>
+    </div>
+  </div>
   </div>
 
   <script>
+    var PerpsideTokens = (function () {
+      var KEY = 'perpside_launched_tokens';
+
+      function getAll() {
+        try {
+          var raw = localStorage.getItem(KEY);
+          return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+          return [];
+        }
+      }
+
+      function add(token) {
+        var list = getAll();
+        list.push(token);
+        try {
+          localStorage.setItem(KEY, JSON.stringify(list));
+        } catch (e) {}
+        return list;
+      }
+
+      return { getAll: getAll, add: add };
+    })();
+
     (function () {
       var landingScreen = document.getElementById('landingScreen');
       var appScreen = document.getElementById('appScreen');
@@ -858,19 +2239,31 @@
         appScreen.hidden = true;
       }
 
-      var toast = document.getElementById('toast');
-      var toastTimer;
-
       enterBtns.forEach(function (btn) {
         btn.addEventListener('click', function () {
-          if (!toast) return;
-          toast.classList.add('is-visible');
-          clearTimeout(toastTimer);
-          toastTimer = setTimeout(function () {
-            toast.classList.remove('is-visible');
-          }, 3200);
+          showApp();
+          history.pushState({ screen: 'app' }, '', '#app');
+          if (window.showAppPage) window.showAppPage(btn.id === 'heroLaunchBtn' ? 'portfolio' : 'earn');
         });
       });
+
+      var appBrandLogo = document.getElementById('appBrandLogo');
+      if (appBrandLogo) {
+        appBrandLogo.addEventListener('click', function () {
+          showLanding();
+          history.pushState({ screen: 'landing' }, '', location.pathname + location.search);
+        });
+      }
+
+      var howItWorksLandingLink = document.getElementById('howItWorksLandingLink');
+      if (howItWorksLandingLink) {
+        howItWorksLandingLink.addEventListener('click', function (e) {
+          e.preventDefault();
+          showApp();
+          history.pushState({ screen: 'app' }, '', '#app');
+          if (window.showAppPage) window.showAppPage('how');
+        });
+      }
 
       window.addEventListener('popstate', function (e) {
         if (e.state && e.state.screen === 'app') {
@@ -900,305 +2293,1144 @@
       onScroll();
     })();
 
+
     (function () {
-      var monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
+      if (!pages.length) return;
 
-      function lastMonthLabels(n) {
-        var now = new Date();
-        var labels = [];
-        for (var i = n - 1; i >= 0; i--) {
-          var d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          labels.push(monthNames[d.getMonth()]);
-        }
-        return labels;
-      }
-
-      function lastYearLabels(n) {
-        var now = new Date();
-        var labels = [];
-        for (var i = n - 1; i >= 0; i--) {
-          labels.push(String(now.getFullYear() - i));
-        }
-        return labels;
-      }
-
-      var periodConfig = {
-        '7d': {
-          count: 7,
-          stakedBase: 1000, stakedStep: 60,
-          rewardFactor: 0.014,
-          baseH: 26, spreadH: 56, curve: 1, wiggleAmp: 4, wiggleFreq: 1.3, liveFactor: 0.62,
-          labels: function (n) {
-            var out = [];
-            for (var i = 0; i < n; i++) out.push(String(i + 1).padStart(2, '0'));
-            return out;
-          }
-        },
-        '30d': {
-          count: 7,
-          stakedBase: 1000, stakedStep: 700,
-          rewardFactor: 0.09,
-          baseH: 18, spreadH: 62, curve: 0.85, wiggleAmp: 11, wiggleFreq: 2.1, liveFactor: 0.4,
-          labels: lastMonthLabels
-        },
-        '1y': {
-          count: 7,
-          stakedBase: 1000, stakedStep: 2200,
-          rewardFactor: 0.4,
-          baseH: 12, spreadH: 74, curve: 1.6, wiggleAmp: 2, wiggleFreq: 0.7, liveFactor: 0.8,
-          labels: lastYearLabels
-        }
+      window.showAppPage = function (name) {
+        pages.forEach(function (page) {
+          page.hidden = page.id !== 'page-' + name;
+        });
       };
-
-      function fmt(n) {
-        return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
-
-      function buildPeriodData(period) {
-        var c = periodConfig[period];
-        var n = c.count;
-        var labels = c.labels(n);
-        var bars = [];
-        for (var i = 0; i < n; i++) {
-          var t = n > 1 ? i / (n - 1) : 1;
-          var wiggle = Math.sin(i * c.wiggleFreq) * c.wiggleAmp;
-          var isLive = i === n - 1;
-          var h = c.baseH + Math.pow(t, c.curve) * c.spreadH + wiggle;
-          if (isLive) h *= c.liveFactor;
-          h = Math.max(10, Math.min(94, h));
-
-          var staked = c.stakedBase + i * c.stakedStep;
-          var reward = staked * c.rewardFactor * (1 + t * 0.6);
-          if (isLive) reward *= 0.55;
-
-          bars.push({
-            h: h,
-            live: isLive,
-            label: labels[i],
-            reward: reward
-          });
-        }
-        return bars;
-      }
-
-      function livePath(r) {
-        var x1 = 1, y1 = 1, x2 = 99, y2 = 99;
-        return 'M ' + (x1 + r) + ',' + y1 + ' L ' + (x2 - r) + ',' + y1 +
-          ' A ' + r + ',' + r + ' 0 0 1 ' + x2 + ',' + (y1 + r) +
-          ' L ' + x2 + ',' + y2 + ' L ' + x1 + ',' + y2 +
-          ' L ' + x1 + ',' + (y1 + r) +
-          ' A ' + r + ',' + r + ' 0 0 1 ' + (x1 + r) + ',' + y1 + ' Z';
-      }
-
-      function renderChart(period) {
-        var data = buildPeriodData(period);
-        var plotsEl = document.querySelector('.week-chart__plots');
-        var labelsEl = document.querySelector('.week-chart__labels');
-        if (!plotsEl || !labelsEl) return;
-
-        var dense = data.length > 14;
-        plotsEl.classList.toggle('is-dense', dense);
-        labelsEl.classList.toggle('is-dense', dense);
-
-        var radius = data.length <= 7 ? 18 : data.length <= 12 ? 14 : 6;
-        var svgR = data.length <= 7 ? 14 : data.length <= 12 ? 11 : 5;
-
-        var plotsHtml = '';
-        var labelsHtml = '';
-
-        data.forEach(function (bar) {
-          var rectClass = 'bar-rect' + (bar.live ? ' bar-rect--live' : '');
-          var rectStyle = bar.live ? '' : ' style="border-radius:' + radius + 'px ' + radius + 'px 0 0;"';
-          var inner = bar.live
-            ? '<svg class="bar-rect__border" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="' + livePath(svgR) + '"></path></svg>'
-            : '';
-          var rewardLabel = bar.live ? 'Earned so far' : 'Earned';
-
-          plotsHtml += '<div class="bar-plot" style="--h:' + bar.h.toFixed(1) + '%;">' +
-            '<div class="' + rectClass + '"' + rectStyle + '>' + inner + '</div>' +
-            '<div class="bar-tooltip">' +
-            '<span class="bar-tooltip__label">' + rewardLabel + '</span>' +
-            '<span class="bar-tooltip__value">+' + fmt(bar.reward) + ' USDC</span>' +
-            '</div>' +
-            '</div>';
-
-          labelsHtml += '<span>' + (bar.label || '&nbsp;') + '</span>';
-        });
-
-        plotsEl.innerHTML = plotsHtml;
-        labelsEl.innerHTML = labelsHtml;
-      }
-
-      function renderAccruals() {
-        var listEl = document.getElementById('accrualsList');
-        if (!listEl) return;
-        var data = buildPeriodData('7d');
-        var now = new Date();
-        var monthShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        var html = '';
-        for (var i = data.length - 1; i >= 0; i--) {
-          var bar = data[i];
-          var daysAgo = data.length - 1 - i;
-          var d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysAgo);
-          var dateStr = monthShort[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
-          var statusClass = 'accrual-row__status' + (bar.live ? ' accrual-row__status--pending' : '');
-          var statusText = bar.live ? 'Pending' : 'Paid';
-
-          html += '<div class="accrual-row">' +
-            '<span class="accrual-row__date">' + dateStr + '</span>' +
-            '<span class="accrual-row__right">' +
-            '<span class="accrual-row__amount">+' + fmt(bar.reward) + ' USDC</span>' +
-            '<span class="' + statusClass + '">' + statusText + '</span>' +
-            '</span>' +
-            '</div>';
-        }
-        listEl.innerHTML = html;
-      }
-
-      renderChart('7d');
-      renderAccruals();
-      window.renderEarnChart = renderChart;
     })();
 
     (function () {
-      var el = document.getElementById('balanceAmount');
-      if (!el) return;
-
-      function formatValue(v) {
-        return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      }
-
-      function buildOdometer(text) {
-        el.innerHTML = '';
-        for (var i = 0; i < text.length; i++) {
-          var ch = text[i];
-          if (ch >= '0' && ch <= '9') {
-            var cell = document.createElement('span');
-            cell.className = 'digit-cell';
-            var roll = document.createElement('span');
-            roll.className = 'digit-roll';
-            for (var d = 0; d <= 9; d++) {
-              var s = document.createElement('span');
-              s.textContent = String(d);
-              roll.appendChild(s);
-            }
-            roll.style.transform = 'translateY(-' + parseInt(ch, 10) + 'em)';
-            roll.setAttribute('data-digit', ch);
-            cell.appendChild(roll);
-            el.appendChild(cell);
-          } else {
-            var staticCell = document.createElement('span');
-            staticCell.className = 'digit-cell digit-cell--static';
-            staticCell.textContent = ch;
-            el.appendChild(staticCell);
-          }
-        }
-      }
-
-      function updateOdometer(text) {
-        var cells = el.children;
-        if (cells.length !== text.length) {
-          buildOdometer(text);
-          return;
-        }
-        for (var i = 0; i < text.length; i++) {
-          var ch = text[i];
-          var cell = cells[i];
-          if (ch >= '0' && ch <= '9') {
-            var roll = cell.querySelector('.digit-roll');
-            if (roll && roll.getAttribute('data-digit') !== ch) {
-              roll.style.transform = 'translateY(-' + parseInt(ch, 10) + 'em)';
-              roll.setAttribute('data-digit', ch);
-            }
-          } else if (cell.textContent !== ch) {
-            cell.textContent = ch;
-          }
-        }
-      }
-
-      var current = 12451.21;
-      buildOdometer(formatValue(current));
-
-      function scheduleNextTick() {
-        var delay = 500 + Math.random() * 1000;
-        setTimeout(function () {
-          var increment = 0.01 + Math.random() * 0.4;
-          current += increment;
-          updateOdometer(formatValue(current));
-          scheduleNextTick();
-        }, delay);
-      }
-
-      scheduleNextTick();
-    })();
-
-    (function () {
-      var nav = document.querySelector('.subnav-inner');
-      var pill = nav.querySelector('.nav-pill');
-      var items = Array.prototype.slice.call(nav.querySelectorAll('.nav-item'));
-
-      function movePill(target, animate) {
-        var navRect = nav.getBoundingClientRect();
-        var itemRect = target.getBoundingClientRect();
-        if (!animate) pill.style.transition = 'none';
-        pill.style.width = itemRect.width + 'px';
-        pill.style.transform = 'translateX(' + (itemRect.left - navRect.left - 16) + 'px)';
-        if (!animate) {
-          pill.getBoundingClientRect();
-          pill.style.transition = '';
-        }
-      }
-
-      items.forEach(function (item) {
-        item.addEventListener('click', function (e) {
-          e.preventDefault();
-          items.forEach(function (i) { i.classList.remove('active'); });
-          item.classList.add('active');
-          movePill(item, true);
-        });
-      });
-
-      window.addEventListener('resize', function () {
-        var active = nav.querySelector('.nav-item.active');
-        movePill(active, false);
-      });
-
-      movePill(nav.querySelector('.nav-item.active'), false);
-    })();
-
-    (function () {
-      var tabs = document.querySelector('.period-tabs');
-      if (!tabs) return;
-      var pill = tabs.querySelector('.period-tabs__pill');
-      var items = Array.prototype.slice.call(tabs.querySelectorAll('.period-tab'));
-
-      function movePill(target, animate) {
-        var tabsRect = tabs.getBoundingClientRect();
-        var itemRect = target.getBoundingClientRect();
-        if (!animate) pill.style.transition = 'none';
-        pill.style.width = itemRect.width + 'px';
-        pill.style.transform = 'translateX(' + (itemRect.left - tabsRect.left - 3.2) + 'px)';
-        if (!animate) {
-          pill.getBoundingClientRect();
-          pill.style.transition = '';
-        }
-      }
+      var nav = document.querySelector('.how-nav');
+      if (!nav) return;
+      var items = Array.prototype.slice.call(nav.querySelectorAll('.how-nav__item'));
+      var sections = Array.prototype.slice.call(document.querySelectorAll('.how-section'));
 
       items.forEach(function (item) {
         item.addEventListener('click', function () {
           items.forEach(function (i) { i.classList.remove('active'); });
           item.classList.add('active');
-          movePill(item, true);
-          if (window.renderEarnChart) window.renderEarnChart(item.getAttribute('data-period'));
+          var name = item.getAttribute('data-section');
+          sections.forEach(function (s) {
+            s.hidden = s.getAttribute('data-section') !== name;
+          });
+        });
+      });
+    })();
+
+    (function () {
+      var grid = document.getElementById('exploreGrid');
+      var emptyState = document.getElementById('exploreEmpty');
+      var searchInput = document.getElementById('exploreSearchInput');
+      var filters = document.getElementById('exploreFilters');
+      if (!grid || !filters) return;
+
+      var palettes = [
+        ['#2dd4bf', '#0ea5e9'],
+        ['#a855f7', '#ec4899'],
+        ['#f97316', '#ef4444'],
+        ['#22c55e', '#0ea5e9'],
+        ['#eab308', '#f97316'],
+        ['#6366f1', '#a855f7'],
+        ['#14b8a6', '#22c55e'],
+        ['#ec4899', '#f97316']
+      ];
+
+      function fmtCap(n) {
+        if (n >= 1000000) return '$' + (n / 1000000).toFixed(2) + 'M';
+        if (n >= 1000) return '$' + Math.round(n / 1000) + 'K';
+        return '$' + n;
+      }
+
+      function escapeAttr(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function normalizeSocialUrl(value, kind) {
+        var v = value.trim();
+        if (kind === 'x') {
+          v = v.replace(/^@/, '');
+          return /^https?:\/\//i.test(v) ? v : 'https://x.com/' + v;
+        }
+        if (kind === 'telegram') {
+          v = v.replace(/^@/, '');
+          if (/^https?:\/\//i.test(v)) return v;
+          if (/^t\.me\//i.test(v)) return 'https://' + v;
+          return 'https://t.me/' + v;
+        }
+        return /^https?:\/\//i.test(v) ? v : 'https://' + v;
+      }
+
+      function socialIconsHtml(links) {
+        if (!links) return '';
+        var icons = '';
+        if (links.website) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(links.website, 'website')) + '" target="_blank" rel="noopener noreferrer" aria-label="Website">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+            '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18"/></svg></a>';
+        }
+        if (links.x) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(links.x, 'x')) + '" target="_blank" rel="noopener noreferrer" aria-label="X">' +
+            '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>';
+        }
+        if (links.telegram) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(links.telegram, 'telegram')) + '" target="_blank" rel="noopener noreferrer" aria-label="Telegram">' +
+            '<svg viewBox="0 0 448 512" fill="currentColor"><path d="M446.7 98.6l-67.6 318.8c-5.1 22.5-18.4 28.1-37.3 17.5l-103-75.9-49.7 47.8c-5.5 5.5-10.1 10.1-20.7 10.1l7.4-104.9 190.9-172.5c8.3-7.4-1.8-11.5-12.9-4.1L117.8 284 16.2 252.2c-22.1-6.9-22.5-22.1 4.6-32.7L418.2 66.4c18.4-6.9 34.5 4.1 28.5 32.2z"/></svg></a>';
+        }
+        return icons ? '<div class="explore-card__socials">' + icons + '</div>' : '';
+      }
+
+      var assetIconMap = {
+        BTC: 'assets/btc.png',
+        SOL: 'assets/solana.png',
+        ZEC: 'assets/zec.png',
+        ETH: 'assets/eth.png',
+        HYPE: 'assets/hype.jpg',
+        PUMP: 'assets/pump.jpg',
+        STONK: 'assets/stonk.png',
+        XSOL: 'assets/xsol.png',
+        XBTC: 'assets/xbtc.png',
+        XHYPE: 'assets/xhype.png'
+      };
+
+      function positionBadgeHtml(token) {
+        var list = Array.isArray(token.position) ? token.position : (token.position ? [token.position] : []);
+        var imgs = list.map(function (p) {
+          var assetSrc = p && (p.icon || assetIconMap[p.asset]);
+          if (!assetSrc) return '';
+          return '<img class="explore-card__position-asset" src="' + escapeAttr(assetSrc) + '" alt="" onerror="this.style.visibility=\'hidden\'">';
+        }).join('');
+        if (!imgs) return '';
+        var tooltipData = JSON.stringify({ position: list, rewardModel: token.rewardModel || {} });
+        return '<span class="explore-card__position" data-tooltip="' + escapeAttr(tooltipData) + '">' + imgs + '</span>';
+      }
+
+      function renderCard(token, index) {
+        var card = document.createElement('div');
+        card.className = 'explore-card';
+        var mediaStyle;
+        if (token.image) {
+          mediaStyle = "background-image: url('" + token.image + "'); background-size: cover; background-position: center;";
+        } else {
+          var colors = palettes[index % palettes.length];
+          mediaStyle = 'background: linear-gradient(135deg, ' + colors[0] + ', ' + colors[1] + ');';
+        }
+        card.innerHTML =
+          '<div class="explore-card__media" style="' + mediaStyle + '">' +
+            '<span class="explore-card__cap">' + fmtCap(token.cap) + ' <span class="explore-card__cap-label">MC</span></span>' +
+            positionBadgeHtml(token) +
+            '<div class="explore-card__info">' +
+              '<div class="explore-card__text">' +
+                '<div class="explore-card__name">' + token.name + '</div>' +
+                '<span class="explore-card__ticker">' + token.ticker + '</span>' +
+              '</div>' +
+              socialIconsHtml(token.links) +
+            '</div>' +
+          '</div>';
+        return card;
+      }
+
+      function render() {
+        var activeFilter = filters.querySelector('.explore-filter.active');
+        var mode = activeFilter ? activeFilter.getAttribute('data-filter') : 'trending';
+        var query = ((searchInput && searchInput.value) || '').trim().toLowerCase();
+
+        var list = PerpsideTokens.getAll().slice().reverse();
+        if (mode === 'new') {
+          list.sort(function (a, b) { return b.createdAt - a.createdAt; });
+        } else if (mode === 'top') {
+          list.sort(function (a, b) { return b.cap - a.cap; });
+        }
+
+        if (query) {
+          list = list.filter(function (t) {
+            return t.name.toLowerCase().indexOf(query) !== -1 || t.ticker.toLowerCase().indexOf(query) !== -1;
+          });
+        }
+
+        grid.innerHTML = '';
+        list.forEach(function (token, i) {
+          grid.appendChild(renderCard(token, i));
+        });
+
+        if (emptyState) emptyState.hidden = list.length > 0;
+      }
+
+      Array.prototype.slice.call(filters.querySelectorAll('.explore-filter')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          Array.prototype.slice.call(filters.querySelectorAll('.explore-filter')).forEach(function (b) {
+            b.classList.remove('active');
+          });
+          btn.classList.add('active');
+          render();
         });
       });
 
-      window.addEventListener('resize', function () {
-        movePill(tabs.querySelector('.period-tab.active'), false);
+      if (searchInput) searchInput.addEventListener('input', render);
+
+      grid.addEventListener('click', function (e) {
+        if (e.target.closest('.explore-card__social')) {
+          e.stopPropagation();
+          return;
+        }
+        if (e.target.closest('.explore-card')) {
+          window.open('https://jup.ag', '_blank', 'noopener,noreferrer');
+        }
       });
 
-      movePill(tabs.querySelector('.period-tab.active'), false);
+      window.renderExploreGrid = render;
+      window.renderTokenCard = renderCard;
+      render();
     })();
+
+    (function () {
+      var tooltip = document.createElement('div');
+      tooltip.className = 'token-tooltip';
+      document.body.appendChild(tooltip);
+
+      var assetLabelMap = { XSOL: 'xSOL', XBTC: 'xBTC', XHYPE: 'xHYPE' };
+      function assetLabel(asset) {
+        return assetLabelMap[asset] || asset;
+      }
+
+      function escapeHtml(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      var rewardLabels = [
+        ['community', 'Community'],
+        ['creator', 'Creator'],
+        ['buyback', 'Buyback & Burn']
+      ];
+
+      function buildTooltipHtml(data) {
+        var assets = data.position || [];
+        var reward = data.rewardModel || {};
+
+        var assetsHtml = assets.map(function (p) {
+          return '<span class="token-tooltip__asset">' +
+            (p.icon ? '<img src="' + escapeHtml(p.icon) + '" alt="" onerror="this.style.visibility=\'hidden\'">' : '') +
+            escapeHtml(assetLabel(p.asset)) +
+          '</span>';
+        }).join('');
+
+        var rewardHtml = rewardLabels
+          .filter(function (r) { return reward[r[0]]; })
+          .map(function (r) {
+            return '<span class="token-tooltip__stat">' + r[1] + ' <b>' + reward[r[0]] + '%</b></span>';
+          }).join('');
+
+        return '<div class="token-tooltip__assets">' + (assetsHtml || '<span class="token-tooltip__empty">No assets set</span>') + '</div>' +
+          (rewardHtml ? '<div class="token-tooltip__divider"></div><div class="token-tooltip__rows">' + rewardHtml + '</div>' : '');
+      }
+
+      function showTooltip(badge) {
+        var raw = badge.getAttribute('data-tooltip');
+        if (!raw) return;
+        var data;
+        try { data = JSON.parse(raw); } catch (err) { return; }
+
+        tooltip.innerHTML = buildTooltipHtml(data);
+        tooltip.classList.add('is-visible');
+
+        var rect = badge.getBoundingClientRect();
+        var tw = tooltip.offsetWidth;
+        var th = tooltip.offsetHeight;
+        var left = Math.min(rect.left, window.innerWidth - tw - 12);
+        left = Math.max(left, 12);
+        var top = rect.bottom + 8;
+        if (top + th > window.innerHeight - 12) top = rect.top - th - 8;
+        tooltip.style.left = left + 'px';
+        tooltip.style.top = top + 'px';
+      }
+
+      function hideTooltip() {
+        tooltip.classList.remove('is-visible');
+      }
+
+      document.addEventListener('mouseover', function (e) {
+        var badge = e.target.closest('.explore-card__position');
+        if (badge) showTooltip(badge);
+      });
+
+      document.addEventListener('mouseout', function (e) {
+        var badge = e.target.closest('.explore-card__position');
+        if (badge && !badge.contains(e.relatedTarget)) hideTooltip();
+      });
+
+      document.addEventListener('scroll', hideTooltip, true);
+    })();
+
+    (function () {
+      var form = document.getElementById('launchTokenForm');
+      if (!form) return;
+
+      var assetGrid = document.getElementById('launchAssetGrid');
+      var rewardGroup = document.getElementById('launchReward');
+      var communityFeeRow = document.getElementById('communityFeeRow');
+      var communityFeeSlider = document.getElementById('communityFeeSlider');
+      var communityFeeValue = document.getElementById('communityFeeValue');
+      var creatorFeeRow = document.getElementById('creatorFeeRow');
+      var creatorFeeSlider = document.getElementById('creatorFeeSlider');
+      var creatorFeeValue = document.getElementById('creatorFeeValue');
+      var buybackFeeRow = document.getElementById('buybackFeeRow');
+      var buybackFeeSlider = document.getElementById('buybackFeeSlider');
+      var buybackFeeValue = document.getElementById('buybackFeeValue');
+      var errorEl = document.getElementById('launchError');
+      var previewGrid = document.getElementById('launchPreviewGrid');
+      var imageInput = document.getElementById('launchImageInput');
+      var imagePreview = document.getElementById('launchImagePreview');
+      var imagePlaceholder = document.getElementById('launchImagePlaceholder');
+
+      var assetIconMap = {
+        XSOL: 'assets/xsol.png',
+        XBTC: 'assets/xbtc.png',
+        XHYPE: 'assets/xhype.png'
+      };
+
+      var selectedAssets = ['XSOL'];
+      var MAX_ASSETS = 3;
+      var selectedImage = '';
+      var communityEnabled = true;
+      var creatorEnabled = false;
+      var buybackEnabled = false;
+      var communityFee = 3;
+      var creatorFee = 1;
+      var buybackFee = 1;
+
+      if (imageInput) {
+        imageInput.addEventListener('change', function () {
+          var file = imageInput.files && imageInput.files[0];
+          if (!file) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            selectedImage = reader.result;
+            if (imagePreview) {
+              imagePreview.src = selectedImage;
+              imagePreview.hidden = false;
+            }
+            if (imagePlaceholder) imagePlaceholder.hidden = true;
+            updatePreview();
+          };
+          reader.readAsDataURL(file);
+        });
+      }
+
+      function updatePreview() {
+        if (!previewGrid || !window.renderTokenCard) return;
+        var name = document.getElementById('launchName').value.trim();
+        var ticker = document.getElementById('launchTicker').value.trim().toUpperCase();
+        var x = document.getElementById('launchX').value.trim();
+        var telegram = document.getElementById('launchTelegram').value.trim();
+        var website = document.getElementById('launchWebsite').value.trim();
+
+        var token = {
+          name: name || 'Your Coin',
+          ticker: ticker || 'TICKER',
+          image: selectedImage || undefined,
+          cap: 0,
+          position: selectedAssets.map(function (a) { return { asset: a, icon: assetIconMap[a] }; }),
+          rewardModel: {
+            community: communityEnabled ? communityFee : 0,
+            creator: creatorEnabled ? creatorFee : 0,
+            buyback: buybackEnabled ? buybackFee : 0
+          },
+          links: {
+            x: x || undefined,
+            telegram: telegram || undefined,
+            website: website || undefined
+          }
+        };
+
+        previewGrid.innerHTML = '';
+        var card = window.renderTokenCard(token, 0);
+        if (!selectedImage) {
+          var media = card.querySelector('.explore-card__media');
+          if (media) media.style.background = 'var(--color-card)';
+        }
+        previewGrid.appendChild(card);
+      }
+
+      function updateAssetGridState() {
+        var atMax = selectedAssets.length >= MAX_ASSETS;
+        Array.prototype.slice.call(assetGrid.querySelectorAll('.launch-asset')).forEach(function (b) {
+          var isActive = selectedAssets.indexOf(b.getAttribute('data-asset')) !== -1;
+          b.classList.toggle('active', isActive);
+          b.classList.toggle('launch-asset--disabled', atMax && !isActive);
+        });
+        var addBtn = document.getElementById('launchAssetAddBtn');
+        if (addBtn) addBtn.classList.toggle('launch-asset-add--disabled', atMax);
+      }
+
+      if (assetGrid) {
+        assetGrid.addEventListener('click', function (e) {
+          var btn = e.target.closest('.launch-asset');
+          if (!btn) return;
+          var key = btn.getAttribute('data-asset');
+          var idx = selectedAssets.indexOf(key);
+          if (idx !== -1) {
+            if (selectedAssets.length === 1) return;
+            selectedAssets.splice(idx, 1);
+          } else {
+            if (selectedAssets.length >= MAX_ASSETS) return;
+            selectedAssets.push(key);
+          }
+          updateAssetGridState();
+          updatePreview();
+        });
+      }
+
+      var addAssetBtn = document.getElementById('launchAssetAddBtn');
+      var addAssetModal = document.getElementById('addAssetModal');
+      var addAssetModalBackdrop = document.getElementById('addAssetModalBackdrop');
+      var addAssetModalClose = document.getElementById('addAssetModalClose');
+      var addAssetInput = document.getElementById('addAssetInput');
+      var addAssetResults = document.getElementById('addAssetResults');
+
+      var searchDebounce = null;
+      var searchRequestId = 0;
+
+      function openAddAssetModal() {
+        if (!addAssetModal) return;
+        if (selectedAssets.length >= MAX_ASSETS) return;
+        addAssetModal.classList.add('is-open');
+        if (addAssetInput) {
+          addAssetInput.value = '';
+          addAssetInput.focus();
+        }
+        renderSearchState('hint');
+      }
+
+      function closeAddAssetModal() {
+        if (addAssetModal) addAssetModal.classList.remove('is-open');
+        if (searchDebounce) clearTimeout(searchDebounce);
+      }
+
+      if (addAssetBtn) addAssetBtn.addEventListener('click', openAddAssetModal);
+      if (addAssetModalBackdrop) addAssetModalBackdrop.addEventListener('click', closeAddAssetModal);
+      if (addAssetModalClose) addAssetModalClose.addEventListener('click', closeAddAssetModal);
+
+      function renderSearchState(kind, query) {
+        if (!addAssetResults) return;
+        var text = {
+          hint: 'Search for a token to add it as a backing asset.',
+          loading: 'Searching…',
+          empty: 'No tokens found for "' + query + '".',
+          error: 'Couldn’t reach the token search. Try again.'
+        }[kind];
+        addAssetResults.innerHTML = '';
+        var state = document.createElement('p');
+        state.className = 'token-search__state';
+        state.textContent = text;
+        addAssetResults.appendChild(state);
+      }
+
+      function verifiedBadgeSvg() {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('fill', 'currentColor');
+        svg.innerHTML = '<path d="M12 2l2.4 2.1 3.1-.5 1 3 2.9 1.3-.7 3.1 1.7 2.6-2.3 2.2.2 3.2-3.1.6-1.6 2.8-3-1-3 1-1.6-2.8-3.1-.6.2-3.2-2.3-2.2 1.7-2.6-.7-3.1 2.9-1.3 1-3 3.1.5z"/><path d="M9 12.5l2 2 4-4.5" stroke="#050505" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>';
+        return svg;
+      }
+
+      function renderResults(tokens, query) {
+        if (!addAssetResults) return;
+        if (!tokens.length) {
+          renderSearchState('empty', query);
+          return;
+        }
+
+        addAssetResults.innerHTML = '';
+        tokens.forEach(function (t) {
+          var key = t.symbol.toUpperCase();
+          var already = !!assetGrid.querySelector('.launch-asset[data-asset="' + key + '"]');
+
+          var row = document.createElement('button');
+          row.type = 'button';
+          row.className = 'token-search__row';
+          row.disabled = already;
+
+          if (t.icon) {
+            var img = document.createElement('img');
+            img.className = 'token-search__icon-img';
+            img.src = t.icon;
+            img.alt = '';
+            img.onerror = function () { img.replaceWith(makeAvatar(t.symbol)); };
+            row.appendChild(img);
+          } else {
+            row.appendChild(makeAvatar(t.symbol));
+          }
+
+          var meta = document.createElement('div');
+          meta.className = 'token-search__meta';
+
+          var symbolLine = document.createElement('div');
+          symbolLine.className = 'token-search__symbol';
+          symbolLine.appendChild(document.createTextNode(t.symbol));
+          if (t.isVerified) symbolLine.appendChild(verifiedBadge());
+          meta.appendChild(symbolLine);
+
+          var nameLine = document.createElement('div');
+          nameLine.className = 'token-search__name';
+          nameLine.textContent = (t.name || '') + (t.id ? ' · ' + shortenMint(t.id) : '');
+          meta.appendChild(nameLine);
+
+          row.appendChild(meta);
+
+          if (already) {
+            var added = document.createElement('span');
+            added.className = 'token-search__added';
+            added.textContent = 'Added';
+            row.appendChild(added);
+          }
+
+          row.addEventListener('click', function () {
+            if (already) return;
+            addAssetPill(key, t.symbol, t.icon);
+            closeAddAssetModal();
+          });
+
+          addAssetResults.appendChild(row);
+        });
+      }
+
+      function makeAvatar(symbol) {
+        var avatar = document.createElement('span');
+        avatar.className = 'token-search__avatar';
+        avatar.textContent = (symbol || '?').slice(0, 2).toUpperCase();
+        return avatar;
+      }
+
+      function shortenMint(mint) {
+        if (!mint || mint.length <= 10) return mint || '';
+        return mint.slice(0, 4) + '...' + mint.slice(-6);
+      }
+
+      function verifiedBadge() {
+        var span = document.createElement('span');
+        span.className = 'token-search__verified';
+        span.title = 'Verified';
+        span.appendChild(verifiedBadgeSvg());
+        return span;
+      }
+
+      function addAssetPill(key, label, iconUrl) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'launch-asset';
+        btn.setAttribute('data-asset', key);
+
+        if (iconUrl) {
+          assetIconMap[key] = iconUrl;
+          var img = document.createElement('img');
+          img.src = iconUrl;
+          img.alt = '';
+          img.onerror = function () { img.style.display = 'none'; };
+          btn.appendChild(img);
+        } else {
+          btn.appendChild(makeAvatar(label));
+        }
+
+        btn.appendChild(document.createTextNode(label));
+        assetGrid.insertBefore(btn, addAssetBtn);
+
+        if (selectedAssets.length < MAX_ASSETS) selectedAssets.push(key);
+        updateAssetGridState();
+        updatePreview();
+      }
+
+      function runSearch(query) {
+        var requestId = ++searchRequestId;
+        renderSearchState('loading');
+
+        fetch('https://lite-api.jup.ag/tokens/v2/search?query=' + encodeURIComponent(query))
+          .then(function (res) { return res.ok ? res.json() : []; })
+          .then(function (results) {
+            if (requestId !== searchRequestId) return;
+            var tokens = (Array.isArray(results) ? results : [])
+              .filter(function (t) { return t.symbol; })
+              .sort(function (a, b) {
+                var aExact = a.symbol.toUpperCase() === query.toUpperCase();
+                var bExact = b.symbol.toUpperCase() === query.toUpperCase();
+                if (aExact !== bExact) return aExact ? -1 : 1;
+                if (!!a.isVerified !== !!b.isVerified) return a.isVerified ? -1 : 1;
+                return 0;
+              })
+              .slice(0, 20);
+            renderResults(tokens, query);
+          })
+          .catch(function () {
+            if (requestId !== searchRequestId) return;
+            renderSearchState('error');
+          });
+      }
+
+      if (addAssetInput) {
+        addAssetInput.addEventListener('input', function () {
+          var query = addAssetInput.value.trim();
+          if (searchDebounce) clearTimeout(searchDebounce);
+          searchRequestId++;
+
+          if (!query) {
+            renderSearchState('hint');
+            return;
+          }
+
+          searchDebounce = setTimeout(function () { runSearch(query); }, 300);
+        });
+      }
+
+      function renderRewardRows() {
+        var othersCount = (creatorEnabled ? 1 : 0) + (buybackEnabled ? 1 : 0);
+
+        if (communityEnabled && othersCount > 0) {
+          var communityMax = Math.max(3 - othersCount, 0.1);
+          if (communityFeeRow) communityFeeRow.hidden = false;
+          if (communityFeeSlider) {
+            communityFeeSlider.hidden = false;
+            communityFeeSlider.max = communityMax;
+            communityFee = Math.min(communityFee, communityMax);
+            communityFeeSlider.value = communityFee;
+          }
+        } else if (communityEnabled) {
+          if (communityFeeRow) communityFeeRow.hidden = false;
+          if (communityFeeSlider) communityFeeSlider.hidden = true;
+          communityFee = 3;
+        } else {
+          if (communityFeeRow) communityFeeRow.hidden = true;
+          if (communityFeeSlider) communityFeeSlider.hidden = true;
+        }
+        if (communityFeeValue) communityFeeValue.textContent = communityFee + '%';
+
+        if (creatorEnabled) {
+          if (creatorFeeRow) creatorFeeRow.hidden = false;
+          if (creatorFeeSlider) {
+            creatorFeeSlider.hidden = false;
+            creatorFeeSlider.value = creatorFee;
+          }
+        } else {
+          if (creatorFeeRow) creatorFeeRow.hidden = true;
+          if (creatorFeeSlider) creatorFeeSlider.hidden = true;
+        }
+        if (creatorFeeValue) creatorFeeValue.textContent = creatorFee + '%';
+
+        if (buybackEnabled) {
+          if (buybackFeeRow) buybackFeeRow.hidden = false;
+          if (buybackFeeSlider) {
+            buybackFeeSlider.hidden = false;
+            buybackFeeSlider.value = buybackFee;
+          }
+        } else {
+          if (buybackFeeRow) buybackFeeRow.hidden = true;
+          if (buybackFeeSlider) buybackFeeSlider.hidden = true;
+        }
+        if (buybackFeeValue) buybackFeeValue.textContent = buybackFee + '%';
+      }
+
+      if (rewardGroup) {
+        Array.prototype.slice.call(rewardGroup.querySelectorAll('.launch-toggle__item')).forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var kind = btn.getAttribute('data-reward');
+            var enabledCount = (communityEnabled ? 1 : 0) + (creatorEnabled ? 1 : 0) + (buybackEnabled ? 1 : 0);
+            var currentlyOn = kind === 'community' ? communityEnabled : (kind === 'creator' ? creatorEnabled : buybackEnabled);
+            if (currentlyOn && enabledCount === 1) return;
+
+            if (kind === 'community') communityEnabled = !communityEnabled;
+            else if (kind === 'creator') creatorEnabled = !creatorEnabled;
+            else buybackEnabled = !buybackEnabled;
+
+            btn.classList.toggle('active', kind === 'community' ? communityEnabled : (kind === 'creator' ? creatorEnabled : buybackEnabled));
+            renderRewardRows();
+            updatePreview();
+          });
+        });
+      }
+
+      if (communityFeeSlider) {
+        communityFeeSlider.addEventListener('input', function () {
+          communityFee = parseFloat(communityFeeSlider.value);
+          if (communityFeeValue) communityFeeValue.textContent = communityFee + '%';
+        });
+      }
+
+      if (creatorFeeSlider) {
+        creatorFeeSlider.addEventListener('input', function () {
+          creatorFee = parseFloat(creatorFeeSlider.value);
+          if (creatorFeeValue) creatorFeeValue.textContent = creatorFee + '%';
+        });
+      }
+
+      if (buybackFeeSlider) {
+        buybackFeeSlider.addEventListener('input', function () {
+          buybackFee = parseFloat(buybackFeeSlider.value);
+          if (buybackFeeValue) buybackFeeValue.textContent = buybackFee + '%';
+        });
+      }
+
+      var firstBuyToggle = document.getElementById('launchFirstBuyToggle');
+      var firstBuyPanel = document.getElementById('launchFirstBuyPanel');
+      if (firstBuyToggle && firstBuyPanel) {
+        firstBuyToggle.addEventListener('click', function () {
+          var open = firstBuyPanel.hidden;
+          firstBuyPanel.hidden = !open;
+          firstBuyToggle.classList.toggle('is-open', open);
+        });
+      }
+
+      var linksToggle = document.getElementById('launchLinksToggle');
+      var linksPanel = document.getElementById('launchLinksPanel');
+      if (linksToggle && linksPanel) {
+        linksToggle.addEventListener('click', function () {
+          var open = linksPanel.hidden;
+          linksPanel.hidden = !open;
+          linksToggle.classList.toggle('is-open', open);
+        });
+      }
+
+      var previewFieldIds = ['launchName', 'launchTicker', 'launchX', 'launchTelegram', 'launchWebsite'];
+      form.addEventListener('input', function (e) {
+        if (previewFieldIds.indexOf(e.target.id) !== -1) {
+          updatePreview();
+        }
+      });
+
+      function resetForm() {
+        form.reset();
+        selectedAssets = ['XSOL'];
+        selectedImage = '';
+        communityEnabled = true;
+        creatorEnabled = false;
+        buybackEnabled = false;
+        communityFee = 3;
+        creatorFee = 1;
+        buybackFee = 1;
+        if (imagePreview) {
+          imagePreview.hidden = true;
+          imagePreview.src = '';
+        }
+        if (imagePlaceholder) imagePlaceholder.hidden = false;
+        updateAssetGridState();
+        if (rewardGroup) {
+          Array.prototype.slice.call(rewardGroup.querySelectorAll('.launch-toggle__item')).forEach(function (b) {
+            b.classList.toggle('active', b.getAttribute('data-reward') === 'community');
+          });
+        }
+        renderRewardRows();
+        if (linksPanel) linksPanel.hidden = true;
+        if (linksToggle) linksToggle.classList.remove('is-open');
+        if (firstBuyPanel) firstBuyPanel.hidden = true;
+        if (firstBuyToggle) firstBuyToggle.classList.remove('is-open');
+        updatePreview();
+      }
+
+      var LAUNCH_API_URL = 'http://localhost:3000';
+      var SUPPORTED_ONCHAIN_ASSETS = ['XSOL', 'XBTC', 'XHYPE'];
+      var submitBtn = document.getElementById('launchSubmitBtn');
+      var submitLabel = document.getElementById('launchSubmitLabel');
+
+      function showLaunchError(message) {
+        if (!errorEl) return;
+        errorEl.textContent = message;
+        errorEl.hidden = false;
+      }
+
+      function base64ToBytes(b64) {
+        var bin = atob(b64);
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes;
+      }
+
+      function bytesToBase64(bytes) {
+        var bin = '';
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+      }
+
+      function apiCall(path, body) {
+        return fetch(LAUNCH_API_URL + path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }).then(function (res) {
+          return res.json().then(function (data) {
+            if (!res.ok) throw new Error(data.error || (path + ' failed'));
+            return data;
+          });
+        });
+      }
+
+      // The only thing the creator ever signs: a transfer covering the real
+      // cost of their launch (mint + N pools, priced server-side) straight
+      // to the platform wallet. The platform sponsors everything downstream
+      // of that — see docs/token-launch-plan.md "Anti-spam fee".
+      function payLaunchFee(creatorWallet, assetSymbols) {
+        return apiCall('/api/launch/fee-tx', { creatorWallet: creatorWallet, assetSymbols: assetSymbols }).then(function (fee) {
+          var wallet = window.__perpsideConnectedWallet;
+          var account = window.__perpsideConnectedAccount;
+          if (!wallet || !account) return Promise.reject(new Error('Wallet disconnected — reconnect and try again.'));
+          var signFeature = wallet.features && wallet.features['solana:signTransaction'];
+          if (!signFeature) return Promise.reject(new Error('Connected wallet does not support signing transactions.'));
+
+          if (submitLabel) submitLabel.textContent = 'Confirm ' + (fee.feeLamports / 1e9).toFixed(3) + ' SOL fee in wallet…';
+
+          return signFeature.signTransaction({
+            account: account,
+            transaction: base64ToBytes(fee.txBase64),
+            chain: 'solana:devnet'
+          }).then(function (outputs) {
+            return bytesToBase64(outputs[0].signedTransaction);
+          });
+        });
+      }
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+
+        var name = document.getElementById('launchName').value.trim();
+        var ticker = document.getElementById('launchTicker').value.trim().toUpperCase();
+        var x = document.getElementById('launchX').value.trim();
+        var telegram = document.getElementById('launchTelegram').value.trim();
+        var website = document.getElementById('launchWebsite').value.trim();
+        var firstBuyAmount = firstBuyPanel && !firstBuyPanel.hidden
+          ? parseFloat(document.getElementById('launchFirstBuyAmount').value)
+          : NaN;
+
+        if (errorEl) errorEl.hidden = true;
+
+        if (!window.__perpsideConnectedAddress) {
+          showLaunchError('Connect a wallet to launch a coin.');
+          if (window.__perpsideOpenWalletModal) window.__perpsideOpenWalletModal();
+          return;
+        }
+        if (!name || !ticker || !selectedImage) {
+          showLaunchError('Coin image, name, and ticker are required.');
+          return;
+        }
+
+        var unsupported = selectedAssets.filter(function (a) {
+          return SUPPORTED_ONCHAIN_ASSETS.indexOf(a) === -1;
+        });
+        if (unsupported.length) {
+          showLaunchError('Only xSOL, xBTC, and xHYPE can be launched on-chain right now — remove ' + unsupported.join(', ') + ' to continue.');
+          return;
+        }
+
+        var creatorWallet = window.__perpsideConnectedAddress;
+        submitBtn.disabled = true;
+        if (submitLabel) submitLabel.textContent = 'Preparing launch fee…';
+
+        payLaunchFee(creatorWallet, selectedAssets)
+          .then(function (signedFeeTxBase64) {
+            if (submitLabel) submitLabel.textContent = 'Launching…';
+            return apiCall('/api/launch', {
+              name: name,
+              ticker: ticker,
+              imageDataUrl: selectedImage,
+              assetSymbols: selectedAssets,
+              creatorWallet: creatorWallet,
+              signedFeeTxBase64: signedFeeTxBase64
+            });
+          })
+          .then(function (data) {
+            PerpsideTokens.add({
+              name: name,
+              ticker: ticker,
+              image: selectedImage || undefined,
+              cap: Math.floor(3000 + Math.random() * 12000),
+              createdAt: Date.now(),
+              mint: data.mint,
+              pools: data.pools,
+              position: selectedAssets.map(function (a) { return { asset: a, icon: assetIconMap[a] }; }),
+              rewardModel: {
+                community: communityEnabled ? communityFee : 0,
+                creator: creatorEnabled ? creatorFee : 0,
+                buyback: buybackEnabled ? buybackFee : 0
+              },
+              firstBuy: isNaN(firstBuyAmount) || firstBuyAmount <= 0 ? undefined : firstBuyAmount,
+              links: {
+                x: x || undefined,
+                telegram: telegram || undefined,
+                website: website || undefined
+              }
+            });
+
+            resetForm();
+            if (window.showAppPage) window.showAppPage('earn');
+            if (window.renderExploreGrid) window.renderExploreGrid();
+          })
+          .catch(function (err) {
+            showLaunchError(err.message || 'Launch failed — is the launch service running?');
+          })
+          .then(function () {
+            submitBtn.disabled = false;
+            if (submitLabel) submitLabel.textContent = 'Launch coin';
+          });
+      });
+
+      updatePreview();
+    })();
+
+    (function () {
+      var connectBtn = document.getElementById('connectWalletBtn');
+      var walletPill = document.getElementById('walletPill');
+      var walletPillIcon = document.getElementById('walletPillIcon');
+      var walletPillAddress = document.getElementById('walletPillAddress');
+      var walletMenuAddress = document.getElementById('walletMenuAddress');
+      var disconnectBtn = document.getElementById('disconnectWalletBtn');
+      var modal = document.getElementById('walletModal');
+      var backdrop = document.getElementById('walletModalBackdrop');
+      var closeBtn = document.getElementById('walletModalClose');
+      var listEl = document.getElementById('walletModalList');
+      if (!connectBtn || !walletPill || !modal || !listEl) return;
+
+      var wallets = new Map();
+
+      function isSolanaWallet(wallet) {
+        return !!(wallet.chains || []).some(function (chain) {
+          return chain.indexOf('solana:') === 0;
+        });
+      }
+
+      function truncate(address) {
+        return address.length > 10 ? address.slice(0, 4) + '…' + address.slice(-4) : address;
+      }
+
+      function renderWalletList() {
+        listEl.innerHTML = '';
+        if (wallets.size === 0) {
+          var empty = document.createElement('p');
+          empty.className = 'wallet-modal__empty';
+          empty.innerHTML = 'No Solana wallets detected. Install <a href="https://phantom.app" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Phantom</a>, <a href="https://jup.ag/wallet" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Jupiter</a>, or <a href="https://backpack.app" target="_blank" rel="noopener noreferrer" class="wallet-modal__empty-link">Backpack</a>.';
+          listEl.appendChild(empty);
+          return;
+        }
+        wallets.forEach(function (wallet) {
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'wallet-option';
+          var img = document.createElement('img');
+          img.src = wallet.icon || '';
+          img.alt = '';
+          var span = document.createElement('span');
+          span.textContent = wallet.name;
+          btn.appendChild(img);
+          btn.appendChild(span);
+          btn.addEventListener('click', function () {
+            connectWallet(wallet);
+          });
+          listEl.appendChild(btn);
+        });
+      }
+
+      function addWallet(wallet) {
+        if (!isSolanaWallet(wallet) || wallets.has(wallet.name)) return;
+        wallets.set(wallet.name, wallet);
+        renderWalletList();
+      }
+
+      window.addEventListener('wallet-standard:register-wallet', function (event) {
+        event.detail({ register: addWallet });
+      });
+      window.dispatchEvent(new CustomEvent('wallet-standard:app-ready', { detail: { register: addWallet } }));
+
+      var activeWallet = null;
+
+      function showConnected(wallet, account) {
+        activeWallet = wallet;
+        walletPillIcon.src = wallet.icon || '';
+        walletPillAddress.textContent = truncate(account.address);
+        if (walletMenuAddress) walletMenuAddress.textContent = truncate(account.address);
+        connectBtn.hidden = true;
+        walletPill.hidden = false;
+        window.__perpsideConnectedAddress = account.address;
+        window.__perpsideConnectedWallet = wallet;
+        window.__perpsideConnectedAccount = account;
+      }
+
+      function showDisconnected() {
+        activeWallet = null;
+        connectBtn.hidden = false;
+        walletPill.hidden = true;
+        window.__perpsideConnectedAddress = null;
+        window.__perpsideConnectedWallet = null;
+        window.__perpsideConnectedAccount = null;
+      }
+
+      function connectWallet(wallet) {
+        var feature = wallet.features && wallet.features['standard:connect'];
+        if (!feature) return;
+        feature
+          .connect()
+          .then(function (result) {
+            var account = result.accounts && result.accounts[0];
+            if (account) {
+              showConnected(wallet, account);
+              closeModal();
+            }
+          })
+          .catch(function (err) {
+            console.error('Wallet connect failed', err);
+          });
+      }
+
+      function disconnectWallet() {
+        var wallet = activeWallet;
+        showDisconnected();
+        if (wallet) {
+          var feature = wallet.features && wallet.features['standard:disconnect'];
+          if (feature) {
+            feature.disconnect().catch(function (err) {
+              console.error('Wallet disconnect failed', err);
+            });
+          }
+        }
+      }
+
+      function openModal() {
+        modal.classList.add('is-open');
+      }
+      window.__perpsideOpenWalletModal = openModal;
+
+      function closeModal() {
+        modal.classList.remove('is-open');
+      }
+
+      connectBtn.addEventListener('click', openModal);
+      if (backdrop) backdrop.addEventListener('click', closeModal);
+      if (closeBtn) closeBtn.addEventListener('click', closeModal);
+
+      if (disconnectBtn) {
+        disconnectBtn.addEventListener('click', function () {
+          disconnectWallet();
+          var menu = document.getElementById('walletMenu');
+          if (menu) menu.classList.remove('is-open');
+        });
+      }
+
+      var headerLaunchBtn = document.getElementById('headerLaunchBtn');
+      if (headerLaunchBtn) {
+        headerLaunchBtn.addEventListener('click', function () {
+          if (window.showAppPage) window.showAppPage('portfolio');
+        });
+      }
+
+      var launchBackBtn = document.getElementById('launchBackBtn');
+      if (launchBackBtn) {
+        launchBackBtn.addEventListener('click', function () {
+          if (window.showAppPage) window.showAppPage('earn');
+        });
+      }
+
+      var howBackBtn = document.getElementById('howBackBtn');
+      if (howBackBtn) {
+        howBackBtn.addEventListener('click', function () {
+          if (window.showAppPage) window.showAppPage('earn');
+        });
+      }
+
+      var howItWorksAppLink = document.getElementById('howItWorksAppLink');
+      if (howItWorksAppLink) {
+        howItWorksAppLink.addEventListener('click', function (e) {
+          e.preventDefault();
+          if (window.showAppPage) window.showAppPage('how');
+        });
+      }
+
+      var depositQrModal = document.getElementById('depositQrModal');
+      var depositQrModalBackdrop = document.getElementById('depositQrModalBackdrop');
+      var depositQrModalClose = document.getElementById('depositQrModalClose');
+      var depositQrCopyBtn = document.getElementById('depositQrCopyBtn');
+      var depositQrAddress = document.getElementById('depositQrAddress');
+      var balanceMenuDeposit = document.getElementById('balanceMenuDeposit');
+      var balanceMenuWithdraw = document.getElementById('balanceMenuWithdraw');
+
+      function openDepositQrModal() {
+        if (depositQrModal) depositQrModal.classList.add('is-open');
+      }
+
+      function closeDepositQrModal() {
+        if (depositQrModal) depositQrModal.classList.remove('is-open');
+      }
+
+      if (depositQrModalBackdrop) depositQrModalBackdrop.addEventListener('click', closeDepositQrModal);
+      if (depositQrModalClose) depositQrModalClose.addEventListener('click', closeDepositQrModal);
+
+      if (balanceMenuDeposit) {
+        balanceMenuDeposit.addEventListener('click', openDepositQrModal);
+      }
+
+      if (balanceMenuWithdraw) {
+        balanceMenuWithdraw.addEventListener('click', function () {
+          if (window.showAppPage) window.showAppPage('earn');
+        });
+      }
+
+      if (depositQrCopyBtn && depositQrAddress) {
+        depositQrCopyBtn.addEventListener('click', function () {
+          var full = depositQrAddress.textContent;
+          function done() {
+            var original = depositQrCopyBtn.textContent;
+            depositQrCopyBtn.textContent = 'Copied!';
+            setTimeout(function () { depositQrCopyBtn.textContent = original; }, 1500);
+          }
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(full).then(done).catch(done);
+          } else {
+            done();
+          }
+        });
+      }
+
+    })();
+
+    (function () {
+      var wrap = document.querySelector('.wallet-wrap');
+      var menu = document.getElementById('walletMenu');
+      var pill = document.getElementById('walletPill');
+      if (!wrap || !menu || !pill) return;
+
+      var closeTimer = null;
+
+      function positionMenu() {
+        var rect = pill.getBoundingClientRect();
+        menu.style.top = (rect.bottom + 4) + 'px';
+        menu.style.right = (window.innerWidth - rect.right) + 'px';
+      }
+
+      function openMenu() {
+        if (closeTimer) {
+          clearTimeout(closeTimer);
+          closeTimer = null;
+        }
+        if (pill.hidden) return;
+        positionMenu();
+        menu.classList.add('is-open');
+      }
+
+      function scheduleClose() {
+        if (closeTimer) clearTimeout(closeTimer);
+        closeTimer = setTimeout(function () {
+          menu.classList.remove('is-open');
+          closeTimer = null;
+        }, 400);
+      }
+
+      wrap.addEventListener('mouseenter', openMenu);
+      wrap.addEventListener('mouseleave', scheduleClose);
+      menu.addEventListener('mouseenter', openMenu);
+      menu.addEventListener('mouseleave', scheduleClose);
+
+      window.addEventListener('resize', function () {
+        if (menu.classList.contains('is-open')) positionMenu();
+      });
+    })();
+
   </script>
 </body>
 </html>

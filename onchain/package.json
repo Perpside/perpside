@@ -1,0 +1,26 @@
+{
+  "name": "perpside-onchain-spike",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@irys/upload": "^0.0.15",
+    "@irys/upload-solana": "^0.1.8",
+    "@raydium-io/raydium-sdk-v2": "^0.2.73-alpha",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
+    "bn.js": "^5.2.5",
+    "cors": "^2.8.6",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1"
+  }
+}

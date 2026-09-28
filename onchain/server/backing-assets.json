@@ -1,0 +1,17 @@
+{
+  "XSOL": {
+    "mint": "CpkDHuoECiPMQpECEhLUXLcipHXAsQ7Nphrnkh66UdTK",
+    "decimals": 6,
+    "usdPrice": 150
+  },
+  "XBTC": {
+    "mint": "JDYLt3MTXHfstCMfWQXwTN5k6icjpeRtNEnoNZLf41kQ",
+    "decimals": 6,
+    "usdPrice": 60000
+  },
+  "XHYPE": {
+    "mint": "3JEhdvjrtyZ533DP3qbCqMr1eMxt2EbPtSn4fwG35Pgz",
+    "decimals": 6,
+    "usdPrice": 25
+  }
+}

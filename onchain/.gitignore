@@ -1,0 +1,7 @@
+node_modules/
+devnet-wallet.json
+test-creator-wallet.json
+*.log
+.env
+server/perpside.db
+server/uploads/

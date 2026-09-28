@@ -2239,11 +2239,24 @@
         appScreen.hidden = true;
       }
 
+      // The Launch and How-it-works pages' back buttons need to know where
+      // the user actually came from (landing, or whichever app page they
+      // were on) instead of always landing on a hardcoded page — see
+      // window.__perpsidePrevAppPage, set by showAppPage itself further
+      // down, and the 'landing' overrides right after each landing-entry
+      // pushState below.
+      window.__perpsideShowLanding = function () {
+        showLanding();
+        history.pushState({ screen: 'landing' }, '', location.pathname + location.search);
+      };
+
       enterBtns.forEach(function (btn) {
         btn.addEventListener('click', function () {
           showApp();
           history.pushState({ screen: 'app' }, '', '#app');
-          if (window.showAppPage) window.showAppPage(btn.id === 'heroLaunchBtn' ? 'portfolio' : 'earn');
+          var isLaunch = btn.id === 'heroLaunchBtn';
+          if (window.showAppPage) window.showAppPage(isLaunch ? 'portfolio' : 'earn');
+          if (isLaunch) window.__perpsidePrevAppPage = 'landing';
         });
       });
 
@@ -2262,6 +2275,7 @@
           showApp();
           history.pushState({ screen: 'app' }, '', '#app');
           if (window.showAppPage) window.showAppPage('how');
+          window.__perpsidePrevAppPage = 'landing';
         });
       }
 
@@ -2298,7 +2312,17 @@
       var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
       if (!pages.length) return;
 
+      // Tracks the page being left so a "back" button (launchBackBtn,
+      // howBackBtn) can return there instead of a hardcoded destination —
+      // landing-entry points override this to 'landing' right after calling
+      // showAppPage, since landing isn't one of these .page elements.
+      window.__perpsideCurrentAppPage = 'earn';
+
       window.showAppPage = function (name) {
+        if (name !== window.__perpsideCurrentAppPage) {
+          window.__perpsidePrevAppPage = window.__perpsideCurrentAppPage;
+        }
+        window.__perpsideCurrentAppPage = name;
         pages.forEach(function (page) {
           page.hidden = page.id !== 'page-' + name;
         });
@@ -3323,18 +3347,27 @@
         });
       }
 
+      // Returns to wherever the user actually came from — landing, or
+      // whichever app page they were on — instead of a hardcoded page.
+      // window.__perpsidePrevAppPage is kept current by showAppPage itself,
+      // with the landing-entry points overriding it to 'landing' since that
+      // screen isn't one of the .page elements showAppPage knows about.
+      function goBackFrom() {
+        if (window.__perpsidePrevAppPage === 'landing') {
+          if (window.__perpsideShowLanding) window.__perpsideShowLanding();
+          return;
+        }
+        if (window.showAppPage) window.showAppPage(window.__perpsidePrevAppPage || 'earn');
+      }
+
       var launchBackBtn = document.getElementById('launchBackBtn');
       if (launchBackBtn) {
-        launchBackBtn.addEventListener('click', function () {
-          if (window.showAppPage) window.showAppPage('earn');
-        });
+        launchBackBtn.addEventListener('click', goBackFrom);
       }
 
       var howBackBtn = document.getElementById('howBackBtn');
       if (howBackBtn) {
-        howBackBtn.addEventListener('click', function () {
-          if (window.showAppPage) window.showAppPage('earn');
-        });
+        howBackBtn.addEventListener('click', goBackFrom);
       }
 
       var howItWorksAppLink = document.getElementById('howItWorksAppLink');

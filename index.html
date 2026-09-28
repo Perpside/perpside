@@ -2017,7 +2017,7 @@
                   <span class="reward-row__label">Community reward — paid to every holder</span>
                   <span class="reward-row__value" id="communityFeeValue">3%</span>
                 </div>
-                <input type="range" class="launch-range" id="communityFeeSlider" min="0.1" max="2" step="0.1" value="2" hidden>
+                <input type="range" class="launch-range" id="communityFeeSlider" min="0.1" max="3" step="0.1" value="3">
 
                 <div class="reward-row" id="creatorFeeRow" hidden>
                   <span class="reward-row__label">Creator reward — paid to you</span>
@@ -2245,15 +2245,20 @@
       // window.__perpsidePrevAppPage, set by showAppPage itself further
       // down, and the 'landing' overrides right after each landing-entry
       // pushState below.
+      // Clean path instead of a #hash — the hash never reached the server,
+      // so a direct load/refresh of /app needs server-side support too
+      // (see server/index.mjs, which now serves index.html for it as well).
+      var APP_PATH = '/app';
+
       window.__perpsideShowLanding = function () {
         showLanding();
-        history.pushState({ screen: 'landing' }, '', location.pathname + location.search);
+        history.pushState({ screen: 'landing' }, '', '/' + location.search);
       };
 
       enterBtns.forEach(function (btn) {
         btn.addEventListener('click', function () {
           showApp();
-          history.pushState({ screen: 'app' }, '', '#app');
+          history.pushState({ screen: 'app' }, '', APP_PATH);
           var isLaunch = btn.id === 'heroLaunchBtn';
           if (window.showAppPage) window.showAppPage(isLaunch ? 'portfolio' : 'earn');
           if (isLaunch) window.__perpsidePrevAppPage = 'landing';
@@ -2264,7 +2269,7 @@
       if (appBrandLogo) {
         appBrandLogo.addEventListener('click', function () {
           showLanding();
-          history.pushState({ screen: 'landing' }, '', location.pathname + location.search);
+          history.pushState({ screen: 'landing' }, '', '/' + location.search);
         });
       }
 
@@ -2273,7 +2278,7 @@
         howItWorksLandingLink.addEventListener('click', function (e) {
           e.preventDefault();
           showApp();
-          history.pushState({ screen: 'app' }, '', '#app');
+          history.pushState({ screen: 'app' }, '', APP_PATH);
           if (window.showAppPage) window.showAppPage('how');
           window.__perpsidePrevAppPage = 'landing';
         });
@@ -2287,9 +2292,9 @@
         }
       });
 
-      if (location.hash === '#app') {
+      if (location.pathname === APP_PATH) {
         showApp();
-        history.replaceState({ screen: 'app' }, '', '#app');
+        history.replaceState({ screen: 'app' }, '', APP_PATH);
       } else {
         history.replaceState({ screen: 'landing' }, '', location.pathname + location.search);
       }
@@ -2617,7 +2622,7 @@
         XHYPE: 'assets/xhype.png'
       };
 
-      var selectedAssets = ['XSOL'];
+      var selectedAssets = [];
       var MAX_ASSETS = 3;
       var selectedImage = '';
       var communityEnabled = true;
@@ -2680,6 +2685,9 @@
         previewGrid.appendChild(card);
       }
 
+      // Backing assets are mandatory — same as coin image/name/ticker — so
+      // the launch button stays disabled until at least one is picked,
+      // instead of only failing at submit time.
       function updateAssetGridState() {
         var atMax = selectedAssets.length >= MAX_ASSETS;
         Array.prototype.slice.call(assetGrid.querySelectorAll('.launch-asset')).forEach(function (b) {
@@ -2689,6 +2697,7 @@
         });
         var addBtn = document.getElementById('launchAssetAddBtn');
         if (addBtn) addBtn.classList.toggle('launch-asset-add--disabled', atMax);
+        if (submitBtn) submitBtn.disabled = selectedAssets.length === 0;
       }
 
       if (assetGrid) {
@@ -2698,7 +2707,6 @@
           var key = btn.getAttribute('data-asset');
           var idx = selectedAssets.indexOf(key);
           if (idx !== -1) {
-            if (selectedAssets.length === 1) return;
             selectedAssets.splice(idx, 1);
           } else {
             if (selectedAssets.length >= MAX_ASSETS) return;
@@ -2912,8 +2920,8 @@
       function renderRewardRows() {
         var othersCount = (creatorEnabled ? 1 : 0) + (buybackEnabled ? 1 : 0);
 
-        if (communityEnabled && othersCount > 0) {
-          var communityMax = Math.max(3 - othersCount, 0.1);
+        if (communityEnabled) {
+          var communityMax = othersCount > 0 ? Math.max(3 - othersCount, 0.1) : 3;
           if (communityFeeRow) communityFeeRow.hidden = false;
           if (communityFeeSlider) {
             communityFeeSlider.hidden = false;
@@ -2921,10 +2929,6 @@
             communityFee = Math.min(communityFee, communityMax);
             communityFeeSlider.value = communityFee;
           }
-        } else if (communityEnabled) {
-          if (communityFeeRow) communityFeeRow.hidden = false;
-          if (communityFeeSlider) communityFeeSlider.hidden = true;
-          communityFee = 3;
         } else {
           if (communityFeeRow) communityFeeRow.hidden = true;
           if (communityFeeSlider) communityFeeSlider.hidden = true;
@@ -3025,7 +3029,7 @@
 
       function resetForm() {
         form.reset();
-        selectedAssets = ['XSOL'];
+        selectedAssets = [];
         selectedImage = '';
         communityEnabled = true;
         creatorEnabled = false;
@@ -3139,6 +3143,10 @@
           showLaunchError('Coin image, name, and ticker are required.');
           return;
         }
+        if (!selectedAssets.length) {
+          showLaunchError('Pick at least one backing asset.');
+          return;
+        }
 
         var unsupported = selectedAssets.filter(function (a) {
           return SUPPORTED_ONCHAIN_ASSETS.indexOf(a) === -1;
@@ -3195,11 +3203,13 @@
             showLaunchError(err.message || 'Launch failed — is the launch service running?');
           })
           .then(function () {
-            submitBtn.disabled = false;
+            submitBtn.disabled = selectedAssets.length === 0;
             if (submitLabel) submitLabel.textContent = 'Launch coin';
           });
       });
 
+      updateAssetGridState();
+      renderRewardRows();
       updatePreview();
     })();
 

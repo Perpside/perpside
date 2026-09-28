@@ -78,7 +78,10 @@ app.post('/api/launch', async (req, res) => {
 // registered after the API routes so nothing under /api ever falls through
 // to the file server.
 app.use('/assets', express.static(path.join(repoRoot, 'assets')));
-app.get('/', (req, res) => res.sendFile(path.join(repoRoot, 'index.html')));
+// '/app' is a client-side-only route (see the history.pushState calls in
+// index.html) — there's no server-side app/ content, so a direct load or
+// refresh of it needs to get the same index.html the '/' route serves.
+app.get(['/', '/app'], (req, res) => res.sendFile(path.join(repoRoot, 'index.html')));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {

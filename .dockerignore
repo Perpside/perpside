@@ -1,0 +1,8 @@
+.git
+onchain/node_modules
+onchain/.env
+onchain/devnet-wallet.json
+onchain/test-creator-wallet.json
+onchain/server/perpside.db
+onchain/server/uploads
+onchain/*.log

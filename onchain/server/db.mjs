@@ -3,7 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const db = new DatabaseSync(path.join(__dirname, 'perpside.db'));
+// DB_PATH lets a deploy point this at a mounted volume (e.g. Railway) so the
+// launch history survives restarts/redeploys — a plain container filesystem
+// is wiped on every deploy. Falls back to a file next to this module for
+// local dev.
+const db = new DatabaseSync(process.env.DB_PATH || path.join(__dirname, 'perpside.db'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS tokens (

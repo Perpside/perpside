@@ -1,8 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { launchToken, prepareFee, listBackingAssets, LaunchValidationError } from './launch.mjs';
 import { listTokens, getToken } from './db.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.join(__dirname, '..', '..');
 
 const app = express();
 
@@ -66,6 +71,14 @@ app.post('/api/launch', async (req, res) => {
     res.status(500).json({ error: 'launch failed', detail: err.message });
   }
 });
+
+// Same service also serves the static landing page/dashboard (index.html,
+// assets/) — one Railway service, one domain, no separate CORS story for
+// the frontend calling its own origin's /api/* routes. Static assets are
+// registered after the API routes so nothing under /api ever falls through
+// to the file server.
+app.use('/assets', express.static(path.join(repoRoot, 'assets')));
+app.get('/', (req, res) => res.sendFile(path.join(repoRoot, 'index.html')));
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {

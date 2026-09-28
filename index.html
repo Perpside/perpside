@@ -3028,7 +3028,10 @@
         updatePreview();
       }
 
-      var LAUNCH_API_URL = 'http://localhost:3000';
+      // Local dev serves index.html and the API off different ports
+      // (python http.server + node); in production the same Express
+      // service serves both, so same-origin relative paths work.
+      var LAUNCH_API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
       var SUPPORTED_ONCHAIN_ASSETS = ['XSOL', 'XBTC', 'XHYPE'];
       var submitBtn = document.getElementById('launchSubmitBtn');
       var submitLabel = document.getElementById('launchSubmitLabel');

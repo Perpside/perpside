@@ -1137,3 +1137,37 @@ number formatting used `toLocaleString(undefined, ...)`, which renders
 with a comma decimal separator under some browser locales; forced
 `'en-US'` explicitly so it's consistent with the rest of the site
 regardless of a visitor's locale.
+
+## Token detail page, round 2: it read as too plain (2026-09-29)
+
+First version was functionally complete but visually flat — three
+same-weight cards of label/value rows, no real hierarchy, nothing that
+made a coin's own page feel like *its* page rather than a generic
+settings panel. Reworked the same data into:
+
+- A banner at the top using the coin's own image (blurred, darkened) as
+  the background, or one of Explore's gradient pairs when there's no
+  image — same technique Explore already uses for image-less cards, so a
+  coin without art still gets a colored, non-empty banner. Market cap
+  now shown here too (previously missing from the page entirely, despite
+  being the first thing Explore's own cards lead with).
+- Reward model as a stacked split bar + colored legend instead of three
+  plain rows — reads as "who gets what share" at a glance instead of
+  needing to compare three separate numbers by hand.
+- Tokenomics as icon-led stat tiles (people icon/community, person
+  icon/creator, flame icon/buyback) with a big USD headline number per
+  tile and the exact per-asset amount as a sub-line, instead of the same
+  label/value row style used for static config elsewhere on the page —
+  the whole point of this section is "real money moved," so it gets the
+  visual weight a dashboard stat gets, not a settings row. USD figures
+  come from each backing asset's own price (`/api/backing-assets`,
+  already fetched) rather than adding a new pricing dependency.
+
+Backing assets got a small upgrade too (icon + symbol + approximate
+share of supply per pool row) instead of a single bare pill, since a
+whole card for one small badge was part of what read as empty.
+
+Verified the same way as round 1 — real browser, real seeded payout
+data (this time across two backing assets, to check the multi-asset
+tile sub-line renders correctly) — plus a fresh mobile screenshot, since
+the whole layout changed.

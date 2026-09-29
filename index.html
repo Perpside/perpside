@@ -2451,6 +2451,7 @@
       function renderCard(token, index) {
         var card = document.createElement('div');
         card.className = 'explore-card';
+        if (token.mint) card.dataset.mint = token.mint;
         var mediaStyle;
         if (token.image) {
           mediaStyle = "background-image: url('" + token.image + "'); background-size: cover; background-position: center;";
@@ -2516,8 +2517,10 @@
           e.stopPropagation();
           return;
         }
-        if (e.target.closest('.explore-card')) {
-          window.open('https://jup.ag', '_blank', 'noopener,noreferrer');
+        var card = e.target.closest('.explore-card');
+        if (card) {
+          var url = card.dataset.mint ? 'https://jup.ag/tokens/' + card.dataset.mint : 'https://jup.ag';
+          window.open(url, '_blank', 'noopener,noreferrer');
         }
       });
 

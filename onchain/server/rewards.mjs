@@ -41,6 +41,14 @@ const TRIGGER_THRESHOLD_USD = 5000;
 // harvested there's no partial-position amount left to reharvest later.
 const DUST_THRESHOLD_USD = 1;
 
+// Platform revenue cut — taken off the top of every harvest, before the
+// Community/Creator/Buyback split even runs. Community/Creator/Buyback
+// percentages the creator configured at launch describe the *pool's* fee,
+// not this cut, so this comes first and the reward-model split runs on
+// whatever's left, not on the full harvested amount.
+const PLATFORM_FEE_FRACTION = 0.10;
+const REVENUE_WALLET = '7qRCnebUspWNLEFbmgcvWrrJq28gHV8CjdqPfshpZxfj';
+
 const backingAssets = listBackingAssets();
 
 function backingAssetInfo(symbol) {
@@ -195,6 +203,19 @@ async function executeBuyback({ runPoolId, poolAddress, coinMint, backingAssetMi
   markRewardBuybackSent(payout.id, `${swapResult.txId},${burnResult.txId}`, swapResult.coinAmountOut);
 }
 
+async function payPlatformRevenue({ runPoolId, backingAssetMint, amountAtomic }) {
+  let payout = getRewardPayouts(runPoolId).find((p) => p.kind === 'platform');
+  if (!payout) {
+    if (amountAtomic.lten(0)) return;
+    const id = insertRewardPayout({ runPoolId, kind: 'platform', recipientWallet: REVENUE_WALLET, amount: amountAtomic, status: 'pending' });
+    payout = getRewardPayouts(runPoolId).find((p) => p.id === id);
+  }
+  if (payout.status !== 'pending') return;
+
+  const [result] = await sendTokenBatch(backingAssetMint, [{ wallet: payout.recipient_wallet, amountAtomic: new BN(payout.amount) }]);
+  markRewardPayoutSent(payout.id, result.txId);
+}
+
 async function processPool(run, token, pool) {
   const asset = backingAssetInfo(pool.backing_asset);
   let runPool = getRewardRunPools(run.id).find((rp) => rp.pool_id === pool.id);
@@ -224,7 +245,11 @@ async function processPool(run, token, pool) {
 
   try {
     const harvestedAtomic = new BN(runPool.harvested_amount);
-    const { communityAtomic, creatorAtomic, buybackAtomic } = splitByRewardModel(harvestedAtomic, token);
+    const platformFeeAtomic = harvestedAtomic.muln(Math.round(PLATFORM_FEE_FRACTION * 100)).divn(100);
+    await payPlatformRevenue({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, amountAtomic: platformFeeAtomic });
+
+    const remainderAtomic = harvestedAtomic.sub(platformFeeAtomic);
+    const { communityAtomic, creatorAtomic, buybackAtomic } = splitByRewardModel(remainderAtomic, token);
     const usdPrice = (await fetchAssetUsdPrice(asset)) ?? 0;
     const excludeOwners = [...token.pools.map((p) => p.pool_address), getPlatformWallet().publicKey.toBase58()];
 

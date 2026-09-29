@@ -1171,3 +1171,25 @@ Verified the same way as round 1 — real browser, real seeded payout
 data (this time across two backing assets, to check the multi-asset
 tile sub-line renders correctly) — plus a fresh mobile screenshot, since
 the whole layout changed.
+
+## Platform revenue cut: 10% off the top of every harvest (2026-09-30)
+
+The reward cron previously split 100% of a harvested pool's fees across
+Community/Creator/Buyback. Added a platform cut on top: 10% of every
+harvest now goes to a fixed revenue wallet
+(`7qRCnebUspWNLEFbmgcvWrrJq28gHV8CjdqPfshpZxfj`) *before* the
+Community/Creator/Buyback split runs — that split now runs against the
+remaining 90%, not the full harvested amount. Implemented as a fourth
+payout kind (`'platform'`) in `reward_payouts`, following the same
+idempotent-resume pattern as the other three (checks for an existing row
+before sending, so a retry after a later step fails doesn't re-send the
+platform cut).
+
+Verified end-to-end on real devnet: minted a coin, generated real fee
+volume, ran the cron, and confirmed by reading the revenue wallet's
+actual on-chain balance (not just the DB row) that it received exactly
+10% of the harvested amount — 388 out of 3884 atomic units — landing
+*before* the creator/buyback transactions in `reward_payouts`'
+insertion order, with the remaining 90% (3496) splitting into
+community/creator/buyback at the token's configured ratio exactly as
+expected (1398/699/1399).

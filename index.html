@@ -2092,8 +2092,9 @@
           <div class="how-content">
             <div class="how-section" data-section="overview">
               <h2>Overview</h2>
-              <p>Perpside is a launchpad for coins backed by real assets. When you launch a coin, you choose up to three backing assets &mdash; the built&#8209;in Hylo leveraged tokens (xSOL, xBTC, xHYPE) or any token on Solana &mdash; and a reward model that routes a share of every trade to holders, to you as the creator, or into an automatic buyback &amp; burn.</p>
-              <p>Every coin is a normal SPL token from the moment it launches. It can be bought, sold, and held anywhere Solana tokens are supported &mdash; Perpside just gives it a home, a live price chart, and a fee engine.</p>
+              <p>Perpside is a launchpad for coins backed by real assets &mdash; with <b>no bonding curve and no graduation event</b>. Platforms that use a bonding curve keep a coin in a holding pattern until it crosses some volume threshold, then migrate it to a real exchange &mdash; a separate, risky step where liquidity briefly moves and prices can gap. Perpside skips that entirely: when you launch a coin, Perpside creates real, on&#8209;chain Raydium liquidity pools for it in the same transaction flow, live from the first block. There's nothing to graduate into, because the coin launches directly into the real thing.</p>
+              <p>You choose one to three backing assets for a coin &mdash; the built&#8209;in Hylo leveraged tokens (xSOL, xBTC, xHYPE) or any token on Solana &mdash; and each one gets its own pool. Backing a coin with more than one asset isn't just about reaching more buyers: the pools stay linked through the coin's own price, so if two backing assets drift against each other in the wider market (which xSOL and xBTC constantly do, being leveraged), the coin's implied exchange rate between them drifts out of line too. That gap is a standing arbitrage opportunity, and arbitrageurs close it by trading through the coin itself &mdash; real swaps, real fees, generated purely by keeping the coin's own markets consistent with each other. A multi&#8209;asset coin picks up a background hum of trading activity this way, on top of whatever organic demand it earns on its own, and every one of those trades feeds the same reward model below.</p>
+              <p>Every coin is a normal SPL token the moment it launches, with its mint authority renounced and its metadata locked immutable at creation &mdash; supply is fixed forever and its name, ticker, and logo can never be changed by anyone, including Perpside. It can be bought, sold, and held anywhere Solana tokens are supported.</p>
             </div>
 
             <div class="how-section" data-section="launching" hidden>
@@ -2103,33 +2104,35 @@
                 <li><b>Identity</b> &mdash; upload an image, and set a name and ticker.</li>
                 <li><b>Backing assets</b> &mdash; pick 1&ndash;3 assets from xSOL, xBTC, and xHYPE, or search any Solana token by name, symbol, or mint address and add it to the mix.</li>
                 <li><b>Reward model</b> &mdash; turn on Community, Creator, Buyback &amp; Burn, or any combination, and set each one's fee within its cap.</li>
-                <li><b>First buy</b> (optional) &mdash; set an amount to buy immediately at launch, seeding the initial price and supply.</li>
+                <li><b>First buy</b> (optional) &mdash; set an amount of SOL to buy immediately at launch, capped at 10% of total supply so a creator can't corner their own coin at launch.</li>
                 <li><b>Links</b> (optional) &mdash; attach an X account, Telegram, and website so traders can find the community.</li>
               </ol>
-              <p>Once submitted, the coin appears instantly in Explore, ready to trade.</p>
+              <p>Submitting charges one fee, paid straight to the transaction &mdash; sized to the real on&#8209;chain cost of minting the coin and creating its pool(s), plus a small margin. It isn't a flat platform markup, and it exists mainly as anti&#8209;spam: launching costs the same whether Perpside sponsors it or not, so this just makes sure the person launching is the one paying for what they're creating.</p>
+              <p>Once that transaction lands, everything else &mdash; the mint, the metadata, every pool and its starting liquidity &mdash; is created in the same flow. There's no waiting period and no second step: the coin appears in Explore already tradeable, because it already is.</p>
             </div>
 
             <div class="how-section" data-section="fees" hidden>
               <h2>Reward Model &amp; Fees</h2>
-              <p>Every coin's total trading fee is capped at <b>3%</b>, split across up to three destinations. At least one must be enabled:</p>
+              <p>Every coin's total trading fee is capped at <b>3%</b>, split across up to three destinations you configure at launch. At least one must be enabled:</p>
               <ul>
-                <li><b>Community</b> &mdash; paid directly to every holder's wallet in proportion to their balance. Fixed at 3% when it's the only reward enabled; otherwise adjustable down to make room for the others.</li>
+                <li><b>Community</b> &mdash; paid directly to every holder's wallet in proportion to their balance. Adjustable anywhere up to the full 3% when it's the only reward enabled, or shared down to make room for the others.</li>
                 <li><b>Creator</b> &mdash; paid to the coin's creator. Capped at 1%, regardless of what else is enabled.</li>
                 <li><b>Buyback &amp; Burn</b> &mdash; used to buy the coin back from the market and burn it, permanently reducing supply. Capped at 1%.</li>
               </ul>
-              <p>With all three enabled, each is capped at 1% &mdash; still summing to the same 3% ceiling. There's no separate "fee tier" to pick; the model is whatever combination of the three the creator configures at launch, and it's visible on&#8209;chain to every trader.</p>
-              <p>Rewards are distributed automatically &mdash; there's <b>no claiming</b>. Fees accumulate in the coin's reward pool as it trades, and every time the pool reaches <b>$10,000</b>, it's automatically paid out: Community rewards land directly in holders' wallets, Creator fees are sent to the creator, and any Buyback &amp; Burn allocation executes on&#8209;chain. Simply holding the coin is enough &mdash; there's nothing to do and nothing to sign.</p>
+              <p>With all three enabled, each is capped at 1% &mdash; still summing to the same 3% ceiling. There's no separate "fee tier" to pick; the model is whatever combination of the three the creator configures, and it's recorded against the coin from the moment it launches.</p>
+              <p><b>This piece is still rolling out.</b> The split a creator configures is saved and shown for every coin, but automatic on&#8209;chain collection and payout isn't live yet &mdash; Perpside is beta software, and this is one of the parts still being built. Don't assume a coin is actively paying out rewards; treat the configured split as the coin's intended model until collection is confirmed live.</p>
             </div>
 
             <div class="how-section" data-section="trading" hidden>
               <h2>Trading &amp; Wallet</h2>
-              <p>The <b>Explore</b> page lists every coin launched on Perpside, sorted by Trending, New, or Top market cap, with search by name or ticker.</p>
-              <p>To trade, connect any Solana wallet that supports the Wallet Standard &mdash; Phantom, Jupiter, Backpack, Solflare, and others are detected automatically. Once connected, deposit USDC to your Perpside balance to start trading, and withdraw at any time; your keys never leave your wallet.</p>
+              <p>The <b>Explore</b> page lists every coin launched on Perpside, sorted by Trending, New, or Top market cap, with search by name or ticker. Clicking a coin opens its live pool on Jupiter &mdash; the same pool Perpside created at launch &mdash; where you can trade it directly against its backing asset.</p>
+              <p>Trading happens through your own Solana wallet &mdash; Phantom, Jupiter, Backpack, Solflare, and others are detected automatically when you connect. Perpside never takes custody of your funds and never has access to your keys; every trade is a transaction you sign yourself, straight against the pool, on&#8209;chain.</p>
             </div>
 
             <div class="how-section" data-section="risk" hidden>
               <h2>Risk &amp; Disclaimers</h2>
-              <p>Coins backed by xSOL, xBTC, or xHYPE carry leveraged exposure to their underlying asset &mdash; their price can move sharply in either direction, faster than the underlying asset itself. Coins backed by other tokens carry that token's own volatility.</p>
+              <p>Coins backed by xSOL, xBTC, or xHYPE carry leveraged exposure to their underlying asset &mdash; their price can move sharply in either direction, faster than the underlying asset itself. Coins backed by other tokens carry that token's own volatility. Arbitrage between a coin's pools also means its price can move on days when nothing about the coin itself changed &mdash; only its backing assets did.</p>
+              <p>During beta, Perpside's own wallet creates every coin's mint and its starting liquidity position, and currently still holds that position &mdash; there's no on&#8209;chain lock preventing it from being withdrawn. Mint authority is renounced and metadata is immutable for every coin from the moment it launches, but the starting liquidity itself isn't decentralized yet. Weigh that the same way you would for any new, actively&#8209;developed protocol.</p>
               <p>Perpside is beta software. Contracts, fee mechanics, and supported assets can change, and bugs are possible despite testing. Only trade or launch with funds you're prepared to lose, and always verify a coin's backing assets and reward model before trading it.</p>
             </div>
           </div>

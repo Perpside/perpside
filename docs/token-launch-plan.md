@@ -958,3 +958,43 @@ already-correct COIN=mintA case. The earlier live example (whose XHYPE
 pool has the dust-liquidity issue) is a devnet demo token with no real
 funds at stake and wasn't recreated — the fix only affects pools created
 from here on.
+
+## Reward model polish: real spacing, a custom fee-tier picker, mainnet's tiers up to 3% (2026-09-29)
+
+The previous fee-tier pass shipped functional but visually rough:
+"Trading fee" and the Community/Creator/Buyback split were crammed into
+one `.launch-field`, so the native `<select>`, its hint text, and the
+reward toggles had no consistent breathing room between them, and the
+native `<select>`'s browser-default styling didn't match the rest of the
+form. Three fixes:
+
+1. **Spacing** — split into two separate `.launch-field` blocks ("Trading
+   fee" and "Reward model"), each getting the form's standard 1.25rem
+   rhythm instead of everything sharing one cramped field.
+2. **Custom dropdown** — replaced the native `<select>` with a
+   `.fee-tier-select` trigger + floating menu, reusing the same blurred
+   dark-panel visual language as the existing wallet/balance menus
+   (`.balance-menu`) instead of an unstyleable OS-native control. Opens on
+   click, closes on selection or an outside click, marks the active tier.
+3. **Mainnet tiers, capped at 3%, regardless of which cluster is live** —
+   `listFeeTierPercents` now takes an explicit `{ cluster, maxPercent }`
+   instead of always reading the live `CLUSTER`. `/api/launch-config`
+   calls it with `{ cluster: 'mainnet-beta', maxPercent: 3 }` unconditionally.
+   Devnet's own tier list only goes up to 0.25% — far too narrow for a
+   creator to meaningfully configure a reward split against — so the
+   picker shows mainnet's real 17 tiers (0.01% – 3%, matching the reward
+   model's original ceiling) even while the backend runs on devnet. Once
+   `CLUSTER` actually is `mainnet-beta` in production, this becomes the
+   live tier list with no code change needed — `pickAmmConfig` (which
+   picks the pool's *actual* on-chain tier at launch time) still reads the
+   real `CLUSTER`, so devnet launches still round to whichever of its 3
+   tiers is closest, same as before; only the picker's displayed options
+   changed.
+
+Verified in a real browser (Playwright, local dev server): dropdown
+defaults to the tier closest to 1% (lands on exactly 1%, since it's in the
+list), shows all 17 mainnet-capped options, opens/closes correctly
+including on outside-click, selecting a tier updates the trigger label and
+every reward-row's "% of volume" figure, and the layout now has clear,
+consistent spacing between the fee-tier picker and the reward split —
+confirmed via screenshot, no console errors.

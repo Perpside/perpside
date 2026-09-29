@@ -236,8 +236,12 @@ export function getLaunchConfig() {
     maxFirstBuySupplyFraction: FIRST_BUY_MAX_SUPPLY_FRACTION,
     // The reward model's total fee is a choice among these, not a free
     // slider — anything else can't map onto a real pool (see solana.mjs
-    // pickAmmConfig/listFeeTierPercents).
-    feeTiers: listFeeTierPercents(),
+    // pickAmmConfig/listFeeTierPercents). Always mainnet's tiers capped at
+    // 3% (the reward model's original ceiling), regardless of which
+    // cluster is actually live right now — devnet's own tier list tops out
+    // at 0.25%, far too narrow a range for creators to configure a
+    // meaningful split against.
+    feeTiers: listFeeTierPercents({ cluster: 'mainnet-beta', maxPercent: 3 }),
   };
 }
 

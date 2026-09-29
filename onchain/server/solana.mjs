@@ -122,12 +122,19 @@ export function pickAmmConfig(totalFeePercent) {
 
 // The frontend can't offer a fee choice that pickAmmConfig can't actually
 // honor — so instead of a free-form slider up to some cap, it needs the
-// exact list of tiers Raydium publishes on this cluster to build a picker
-// from. Sorted ascending, deduplicated by rate (each configured tier here
-// has a distinct tradeFeeRate).
-export function listFeeTierPercents() {
-  const configs = CLUSTER === 'mainnet-beta' ? MAINNET_AMM_CONFIGS : DEVNET_AMM_CONFIGS;
-  return [...new Set(configs.map((c) => c.tradeFeeRate / 10000))].sort((a, b) => a - b);
+// exact list of tiers Raydium publishes to build a picker from. Sorted
+// ascending, deduplicated by rate. Takes an explicit `cluster` rather than
+// always reading the live `CLUSTER` — devnet only has 3 tiers topping out
+// at 0.25%, nowhere near enough range for a usable reward-model picker, so
+// the launch form is meant to show mainnet's real tiers even while running
+// against devnet (see listFeeTierPercents's caller in launch.mjs). Once
+// CLUSTER actually is 'mainnet-beta' in production, this becomes exactly
+// the live tier list — no behavior change at that point, just the same
+// list arriving early.
+export function listFeeTierPercents({ cluster = CLUSTER, maxPercent } = {}) {
+  const configs = cluster === 'mainnet-beta' ? MAINNET_AMM_CONFIGS : DEVNET_AMM_CONFIGS;
+  const percents = [...new Set(configs.map((c) => c.tradeFeeRate / 10000))].sort((a, b) => a - b);
+  return typeof maxPercent === 'number' ? percents.filter((p) => p <= maxPercent) : percents;
 }
 
 export const COIN_DECIMALS = 6;

@@ -2903,10 +2903,10 @@
           });
           feeTierMenu.appendChild(opt);
         });
-        // Default to whichever tier is closest to 1% — a reasonable
-        // starting point on any cluster's tier list.
+        // Default to whichever tier is closest to 3% — the reward model's
+        // original ceiling, and the top of the mainnet-capped tier list.
         var closest = tiers.reduce(function (best, t) {
-          return Math.abs(t - 1) < Math.abs(best - 1) ? t : best;
+          return Math.abs(t - 3) < Math.abs(best - 3) ? t : best;
         }, tiers[0]);
         defaultFeeTierPercent = closest;
         totalFeePercent = closest;

@@ -14,6 +14,7 @@ import {
   redactSecrets,
   CLUSTER,
   TOTAL_SUPPLY_WHOLE,
+  COIN_DECIMALS,
 } from './solana.mjs';
 import { getSwapQuote, buildSwapTx, SOL_MINT } from './jupiter.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
@@ -174,12 +175,43 @@ export function listBackingAssets() {
   return backingAssets;
 }
 
+// A creator buying up a big chunk of supply for themselves right at launch
+// looks like a rug-pull setup regardless of intent — cap First Buy so it
+// can never land more than this fraction of total supply. Enforced twice:
+// a cheap pre-swap estimate before hop 1 (so a doomed buy doesn't waste the
+// creator's SOL on the first hop), and precisely against the real swap
+// simulation before hop 2 hands back a signable transaction.
+const FIRST_BUY_MAX_SUPPLY_FRACTION = 0.1;
+
+function maxFirstBuyCoinAtomic() {
+  return (TOTAL_SUPPLY_WHOLE * 10n ** BigInt(COIN_DECIMALS) * 10n) / 100n; // 10%, integer-exact
+}
+
+function assertWithinFirstBuyCap(coinAmountAtomic) {
+  if (coinAmountAtomic > maxFirstBuyCoinAtomic()) {
+    throw new LaunchValidationError(
+      `First Buy is capped at ${FIRST_BUY_MAX_SUPPLY_FRACTION * 100}% of total supply — try a smaller amount`
+    );
+  }
+}
+
+async function fetchSolUsdPrice() {
+  const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${SOL_MINT}`);
+  if (!res.ok) return null;
+  const [token] = await res.json();
+  return token && typeof token.usdPrice === 'number' ? token.usdPrice : null;
+}
+
 // Economics the frontend needs to estimate a First Buy's COIN payout before
 // the coin (and its pool) even exists — every launch starts at the same
 // targetFdvUsd / totalSupplyWhole price, so this is enough for a rough
 // client-side estimate without a new round trip per keystroke.
 export function getLaunchConfig() {
-  return { targetFdvUsd: DEFAULT_TARGET_FDV_USD, totalSupplyWhole: Number(TOTAL_SUPPLY_WHOLE) };
+  return {
+    targetFdvUsd: DEFAULT_TARGET_FDV_USD,
+    totalSupplyWhole: Number(TOTAL_SUPPLY_WHOLE),
+    maxFirstBuySupplyFraction: FIRST_BUY_MAX_SUPPLY_FRACTION,
+  };
 }
 
 // First Buy: optional, creator-signed, lands COIN in the creator's own
@@ -208,6 +240,23 @@ export async function prepareFirstBuyHop1({ mint, buyerWallet, solLamports }) {
   if (!solLamports || solLamports <= 0) throw new LaunchValidationError('invalid first-buy amount');
 
   const pool = firstBuyPool(mint);
+
+  // Rough pre-check before spending anything: if the SOL amount already
+  // clearly implies more than the cap at the flat starting price, reject
+  // now rather than let hop 1 burn real SOL on a buy hop 2 will refuse
+  // anyway. Not authoritative — skipped (not blocked) if the price lookup
+  // fails, since the precise, real check happens at hop 2 regardless.
+  const solPrice = await fetchSolUsdPrice();
+  if (solPrice) {
+    const coinStartPriceUsd = DEFAULT_TARGET_FDV_USD / Number(TOTAL_SUPPLY_WHOLE);
+    const estimatedCoins = ((solLamports / 1e9) * solPrice) / coinStartPriceUsd;
+    if (estimatedCoins > Number(TOTAL_SUPPLY_WHOLE) * FIRST_BUY_MAX_SUPPLY_FRACTION) {
+      throw new LaunchValidationError(
+        `First Buy is capped at ${FIRST_BUY_MAX_SUPPLY_FRACTION * 100}% of total supply — try a smaller amount`
+      );
+    }
+  }
+
   const quote = await getSwapQuote({ inputMint: SOL_MINT, outputMint: pool.backing_asset_mint, amountLamports: solLamports });
   const txBase64 = await buildSwapTx({ quoteResponse: quote, userPublicKey: buyerWallet });
   return { txBase64, cluster: CLUSTER };
@@ -233,14 +282,19 @@ export async function prepareFirstBuyHop2({ mint, buyerWallet }) {
   const amountIn = await getTokenBalance(buyerWallet, pool.backing_asset_mint);
   if (amountIn.isZero()) throw new LaunchValidationError('no balance to buy with — did the first swap land?');
 
-  const txBase64 = await buildFirstBuyTx({
+  const result = await buildFirstBuyTx({
     poolId: pool.pool_address,
     coinMint: mint,
     assetMint: pool.backing_asset_mint,
     buyerWallet,
     amountIn,
   });
-  return { txBase64, cluster: CLUSTER };
+  // Precise this time — checked against the swap simulation's own output
+  // estimate, which reflects this pool's real current price and liquidity,
+  // not a pre-swap guess. Rejected here, before a signable transaction ever
+  // goes back to the client.
+  assertWithinFirstBuyCap(BigInt(result.coinAmountOut));
+  return { txBase64: result.txBase64, cluster: CLUSTER };
 }
 
 export async function broadcastFirstBuyHop2({ mint, signedTxBase64, solLamportsSpent }) {

@@ -526,3 +526,36 @@ Economically this saves almost nothing (two fewer ~5,000-lamport base fees
 round trip and one less place for a partial failure to happen, not cost.
 `MEASURED_MINT_LAMPORTS` in the fee formula wasn't touched; the saving is
 too small to matter against its 15% margin.
+
+## First Buy: capped at 10% of supply (2026-09-29)
+
+A creator buying up a large chunk of their own coin's supply right at
+launch reads as a rug-pull setup regardless of intent, so First Buy now
+refuses anything that would land more than `FIRST_BUY_MAX_SUPPLY_FRACTION`
+(0.1, i.e. 10%) of `TOTAL_SUPPLY_WHOLE` in the creator's wallet. Enforced
+twice, for different reasons:
+
+- **Before hop 1** (`prepareFirstBuyHop1`): a cheap estimate off a live
+  SOL/USD price and the flat starting price (same formula the frontend's
+  live estimate uses) — not precise, but catches an obviously-over-cap
+  request before it spends any real SOL on the first hop. Skipped (not
+  blocked) if the price lookup fails; not authoritative, so failing open
+  here is fine — the next check isn't optional.
+- **Before hop 2 hands back a signable tx** (`prepareFirstBuyHop2`):
+  precise, checked against `swapInternal`'s own simulated output for this
+  exact swap — reflects the pool's real current price and liquidity, not a
+  guess. `buildFirstBuyTx` in `solana.mjs` now returns `coinAmountOut`
+  alongside the transaction specifically so this check can happen before
+  any transaction is even built for the client to sign.
+
+Verified on real devnet pools both ways: minted the test creator wallet a
+deliberately-large XSOL balance and confirmed hop 2 rejects it against a
+fresh pool (`First Buy is capped at 10%...`, no transaction returned), then
+reduced the balance to a small amount and confirmed the same pool accepts
+it normally.
+
+`/api/launch-config` now also returns `maxFirstBuySupplyFraction` so the
+frontend's live estimate can show the same "exceeds the cap" message
+without waiting for a round trip, using the same formula — not
+authoritative (the server checks are), just avoids surprising the creator
+only after they've tried to sign something.

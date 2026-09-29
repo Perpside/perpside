@@ -371,5 +371,11 @@ export async function buildFirstBuyTx({ poolId, coinMint, assetMint, buyerWallet
   });
 
   if (signers.length) transaction.sign(signers);
-  return Buffer.from(transaction.serialize()).toString('base64');
+  return {
+    txBase64: Buffer.from(transaction.serialize()).toString('base64'),
+    // The simulation's own output estimate — precise (reflects this pool's
+    // real current price/liquidity), unlike any pre-swap guess. Callers use
+    // this to enforce a supply cap before ever handing back a signable tx.
+    coinAmountOut: simulation.amountCalculated.toString(),
+  };
 }

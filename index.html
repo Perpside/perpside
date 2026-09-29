@@ -1575,8 +1575,11 @@
 
   .launch-submit {
     display: flex;
-    width: 50%;
+    width: auto;
+    min-width: 50%;
+    max-width: 100%;
     justify-content: center;
+    white-space: nowrap;
   }
 
   .add-asset-submit {
@@ -3079,6 +3082,11 @@
           // asset -> COIN) — the real amount also depends on live slippage
           // at swap time, so this stays an estimate, not a quote.
           var estimatedCoins = (usdValue / coinStartPriceUsd) * 0.99;
+          var maxCoins = config.totalSupplyWhole * config.maxFirstBuySupplyFraction;
+          if (estimatedCoins > maxCoins) {
+            firstBuyEstimateEl.textContent = 'Exceeds the ' + (config.maxFirstBuySupplyFraction * 100) + '% supply cap for First Buy — reduce the amount.';
+            return;
+          }
           firstBuyEstimateEl.textContent = '≈ ' + formatCoinEstimate(estimatedCoins) + ' ' + ticker + ' (estimate — before fees/slippage)';
         }).catch(function () {
           firstBuyEstimateEl.textContent = 'Could not estimate right now — try again shortly.';

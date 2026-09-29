@@ -56,34 +56,69 @@ export function redactSecrets(message) {
   return typeof message === 'string' ? message.split(RPC_URL).join('[rpc]') : message;
 }
 
-// Devnet 0.25%-fee CLMM config, fetched from api-v3-devnet.raydium.io/main/clmm-config.
-const DEVNET_AMM_CONFIG = {
-  id: new PublicKey('CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu'),
-  index: 0,
-  protocolFeeRate: 120000,
-  tradeFeeRate: 2500,
-  tickSpacing: 60,
-  fundFeeRate: 40000,
-  fundOwner: '',
-  description: '',
-};
+// Every CLMM fee tier Raydium has published, per cluster — fetched directly
+// from their own config API (api-v3[-devnet].raydium.io/main/clmm-config)
+// on 2026-09-29. Re-verify before relying on this in a real deploy; Raydium
+// controls this list (creating a new tier is admin-gated on their program,
+// confirmed by reading raydium-clmm's create_amm_config.rs — not something
+// we can do ourselves), so it only changes if *they* add one.
+// tradeFeeRate is parts-per-million (2500 = 0.25%); protocolFeeRate/
+// fundFeeRate are identical across every tier on both clusters.
+const DEVNET_AMM_CONFIGS = [
+  { id: 'F8aaMZVpXaQHk3Qo9BPDhsa7RgpfrfiRsk8L3iXnq3AT', index: 1, tradeFeeRate: 100, tickSpacing: 1 },
+  { id: 'FZdkW5jiYsjTnCVqFqPrxrQisQkCYrohd7ArZhoKnM8q', index: 2, tradeFeeRate: 500, tickSpacing: 10 },
+  { id: 'CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu', index: 0, tradeFeeRate: 2500, tickSpacing: 60 },
+];
+const MAINNET_AMM_CONFIGS = [
+  { id: '9iFER3bpjf1PTTCQCfTRu17EJgvsxo9pVyA9QWwEuX4x', index: 4, tradeFeeRate: 100, tickSpacing: 1 },
+  { id: 'EdPxg8QaeFSrTYqdWJn6Kezwy9McWncTYueD9eMGCuzR', index: 6, tradeFeeRate: 200, tickSpacing: 1 },
+  { id: '9EeWRCL8CJnikDFCDzG8rtmBs5KQR1jEYKCR5rRZ2NEi', index: 7, tradeFeeRate: 300, tickSpacing: 1 },
+  { id: '3h2e43PunVA5K34vwKCLHWhZF4aZpyaC9RmxvshGAQpL', index: 8, tradeFeeRate: 400, tickSpacing: 1 },
+  { id: '3XCQJQryqpDvvZBfGxR7CLAw5dpGJ9aa7kt1jRLdyxuZ', index: 5, tradeFeeRate: 500, tickSpacing: 1 },
+  { id: 'DrdecJVzkaRsf1TQu1g7iFncaokikVTHqpzPjenjRySY', index: 10, tradeFeeRate: 1000, tickSpacing: 10 },
+  { id: 'J8u7HvA1g1p2CdhBFdsnTxDzGkekRpdw4GrL9MKU2D3U', index: 11, tradeFeeRate: 1500, tickSpacing: 10 },
+  { id: 'RPxHtdN5V7ajwkoG6NnwSBAeaX5k9giY37dpp98xTjD', index: 12, tradeFeeRate: 1600, tickSpacing: 10 },
+  { id: '9WjDVMHWCirG9jkchbetHTnSzdXbAPnD9bsoGRcz1xUw', index: 13, tradeFeeRate: 1800, tickSpacing: 10 },
+  { id: 'FMrUDGjEe1izXPbn8SZPNjMfB5JvvhVq5ymmpZDebB5R', index: 14, tradeFeeRate: 2000, tickSpacing: 10 },
+  { id: 'E64NGkDLLCdQ2yFNPcavaKptrEgmiQaNykUuLC1Qgwyp', index: 1, tradeFeeRate: 2500, tickSpacing: 60 },
+  { id: 'Y6YhgJbt9FRk3JVjwdZtsioVCJwCKhy1hum8HMDYyB1', index: 15, tradeFeeRate: 4000, tickSpacing: 60 },
+  { id: '47Nq74YtwjVeTQF6KFKRKU4cY1Vd5AXBHpYRkubkDLZi', index: 16, tradeFeeRate: 6000, tickSpacing: 60 },
+  { id: 'DQeN7dZyQvXKT7YwmgqyuC7AYFkwMoP7RwtucsDEdfYZ', index: 17, tradeFeeRate: 8000, tickSpacing: 60 },
+  { id: 'A1BBtTYJd4i3xU8D6Tc2FzU6ZN4oXZWXKZnCxwbHXr8x', index: 3, tradeFeeRate: 10000, tickSpacing: 120 },
+  { id: 'Gex2NJRS3jVLPfbzSFM5d5DRsNoL5ynnwT1TXoDEhanz', index: 9, tradeFeeRate: 20000, tickSpacing: 120 },
+  { id: 'CDpiwv9eLsRvvuzZEJ8CBtK14wdvkSnkub4vmGtzzdK8', index: 18, tradeFeeRate: 30000, tickSpacing: 120 },
+  { id: '6tBc3ABLaYTTWu94DiRD5PWi92HML34UpAQ8pPTYgudw', index: 19, tradeFeeRate: 40000, tickSpacing: 120 },
+];
 
-// Mainnet equivalent (same 0.25% fee / tick-60 tier), fetched from Raydium's
-// own public config API (api-v3.raydium.io/main/clmm-config) on 2026-09-29.
-// Re-verify against that endpoint before relying on this in a real deploy —
-// Raydium could reshuffle config indices.
-const MAINNET_AMM_CONFIG = {
-  id: new PublicKey('E64NGkDLLCdQ2yFNPcavaKptrEgmiQaNykUuLC1Qgwyp'),
-  index: 1,
-  protocolFeeRate: 120000,
-  tradeFeeRate: 2500,
-  tickSpacing: 60,
-  fundFeeRate: 40000,
-  fundOwner: '',
-  description: '',
-};
+function toAmmConfig(entry) {
+  return {
+    id: new PublicKey(entry.id),
+    index: entry.index,
+    protocolFeeRate: 120000,
+    tradeFeeRate: entry.tradeFeeRate,
+    tickSpacing: entry.tickSpacing,
+    fundFeeRate: 40000,
+    fundOwner: '',
+    description: '',
+  };
+}
 
-export const AMM_CONFIG = CLUSTER === 'mainnet-beta' ? MAINNET_AMM_CONFIG : DEVNET_AMM_CONFIG;
+// Snaps a creator's configured reward-fee total (e.g. 1.5, meaning 1.5%) to
+// whichever published Raydium tier is numerically closest — there's no way
+// to get a pool charging exactly what was configured, only the nearest
+// tier Raydium actually offers (creating a custom one isn't possible, see
+// above). Defaults to the flat 0.25% tier when nothing was configured.
+export function pickAmmConfig(totalFeePercent) {
+  const configs = CLUSTER === 'mainnet-beta' ? MAINNET_AMM_CONFIGS : DEVNET_AMM_CONFIGS;
+  if (!totalFeePercent || totalFeePercent <= 0) {
+    return toAmmConfig(configs.find((c) => c.tradeFeeRate === 2500) ?? configs[0]);
+  }
+  const targetRate = totalFeePercent * 10000; // 1% = 10000 in tradeFeeRate units
+  const closest = configs.reduce((best, c) =>
+    Math.abs(c.tradeFeeRate - targetRate) < Math.abs(best.tradeFeeRate - targetRate) ? c : best
+  );
+  return toAmmConfig(closest);
+}
 
 export const COIN_DECIMALS = 6;
 export const TOTAL_SUPPLY_WHOLE = 1_000_000_000n;
@@ -290,11 +325,15 @@ export async function mintCoinToken({ name, symbol, metadataUri }) {
 // Creates one CLMM pool for `coinMint` paired with `asset`, calibrated to
 // targetFdvUsd, and opens a single-sided (100% COIN) position sized to
 // coinShareWhole. Platform wallet pays all rent and provides all liquidity.
-export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coinShareWhole }) {
+export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coinShareWhole, totalRewardFeePercent }) {
   const raydium = await getRaydium();
   const connection = getConnection();
   const payer = getPlatformWallet();
   const coinIsMintA = isCoinMintA(coinMint, asset.mint);
+
+  // Snapped to the nearest tier Raydium actually publishes — see
+  // pickAmmConfig's own comment for why it can't be exact.
+  const ammConfig = pickAmmConfig(totalRewardFeePercent);
 
   const coinShareAtomic = toAtomicUnits(coinShareWhole, COIN_DECIMALS);
   const { tickLower, tickUpper, base, startPrice } = calibratePool({
@@ -305,7 +344,7 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     targetFdvUsd,
     totalSupplyWhole: TOTAL_SUPPLY_WHOLE,
     coinShareAtomic,
-    tickSpacing: AMM_CONFIG.tickSpacing,
+    tickSpacing: ammConfig.tickSpacing,
   });
 
   const coinToken = toApiV3Token(coinMint, COIN_DECIMALS, 'COIN');
@@ -321,7 +360,7 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     programId: CLMM_PROGRAM_ID_FOR_CLUSTER,
     mint1: coinIsMintA ? coinToken : assetToken,
     mint2: coinIsMintA ? assetToken : coinToken,
-    ammConfig: AMM_CONFIG,
+    ammConfig,
     initialPrice: startPrice,
     collectFeeOnMint: new PublicKey(asset.mint),
     txVersion: TxVersion.V0,

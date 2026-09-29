@@ -148,6 +148,13 @@ export async function launchToken({
     xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
   });
 
+  // The pool's on-chain trading fee is snapped to whichever published
+  // Raydium tier is closest to the reward model's total cut — custom rates
+  // aren't possible (create_amm_config is admin-gated on Raydium's own
+  // program), so this is the nearest approximation, not an exact match. See
+  // solana.mjs pickAmmConfig.
+  const totalRewardFeePercent = (communityFee || 0) + (creatorFee || 0) + (buybackFee || 0);
+
   try {
     const shares = splitSupplyEvenly(1_000_000_000n, assets.length);
     const pools = [];
@@ -159,6 +166,7 @@ export async function launchToken({
         asset: { ...asset, usdPrice },
         targetFdvUsd: DEFAULT_TARGET_FDV_USD,
         coinShareWhole: shares[i],
+        totalRewardFeePercent,
       });
 
       insertPool({

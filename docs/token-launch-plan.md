@@ -821,3 +821,42 @@ the authority.
 Verified for real on devnet: launched a coin, decoded its metadata, and
 confirmed `updateAuthority` reads back as `11111111111111111111111111111111`
 with `isMutable: false` — this time actually cleared, not just inert.
+
+## Pool trading fee snapped to the reward model's total, not hardcoded to 0.25% (2026-09-29)
+
+Pools were always created against a single hardcoded `AMM_CONFIG` (0.25%
+trade fee), regardless of what the creator set on the Community/Creator/
+Buyback sliders at launch. Now the pool's on-chain trading fee tier is
+picked to be the closest match to the sum of those three percentages.
+
+**Why "closest match" instead of exact.** Raydium's CLMM fee tiers
+(`AmmConfig` accounts) aren't arbitrary — `create_amm_config` is
+hard-gated on-chain to a specific admin address
+(`address = crate::admin::ID @ ErrorCode::NotApproved`, confirmed by
+reading the instruction source directly), so this platform can never
+create its own custom-rate config. Only Raydium's own pre-published tiers
+can be used, and they're a short, uneven list: devnet has 3
+(0.01% / 0.05% / 0.25%), mainnet has 18 (0.01% up to 4%, with gaps — e.g.
+nothing between 0.4% and 0.5%, or between 2% and 4%). Each tier also
+carries its own fixed `tickSpacing`, which feeds into pool calibration.
+Given these constraints, exact matching is impossible in general — the
+user explicitly approved nearest-tier rounding as the fallback
+(`pickAmmConfig` in `solana.mjs`, picks by absolute distance in
+`tradeFeeRate` units, defaulting to the 0.25% tier when no reward
+percentage is set).
+
+Both full tier lists are hardcoded from a live fetch of Raydium's own
+`api-v3[-devnet].raydium.io/main/clmm-config` on 2026-09-29 — there's no
+on-chain "list all configs" call, so this is the same approach Raydium's
+own frontend uses.
+
+Verified for real on devnet: minted a coin and created a pool with a 3%
+combined reward total (`totalRewardFeePercent`, above every devnet tier),
+decoded the resulting pool account, and confirmed it landed on the
+expected fallback — devnet's highest tier, 0.25%
+(`CD4aJtX11cqTCAc83nxSPkkh5JW2yjD6uwHeovjqQ1qu`), with `tickSpacing = 60`
+matching that tier and `feeOn = 2` (still correctly pinned to the backing
+asset, unaffected by this change). Devnet can't test the mid-range tiers
+this feature is actually for — its own tier list tops out where mainnet's
+starts getting interesting — so higher tiers remain unverified until a
+real mainnet launch exercises them.

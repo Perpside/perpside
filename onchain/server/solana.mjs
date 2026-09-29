@@ -1,6 +1,14 @@
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createMint, mintTo, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
-import { Raydium, DEVNET_PROGRAM_ID, CLMM_PROGRAM_ID, TxVersion } from '@raydium-io/raydium-sdk-v2';
+import { TOKEN_PROGRAM_ID, createMint, mintTo, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import {
+  Raydium,
+  DEVNET_PROGRAM_ID,
+  CLMM_PROGRAM_ID,
+  TxVersion,
+  getPdaExBitmapAccount,
+  TickArrayBitmapExtensionLayout,
+  swapInternal,
+} from '@raydium-io/raydium-sdk-v2';
 import BN from 'bn.js';
 import fs from 'fs';
 import path from 'path';
@@ -150,11 +158,13 @@ export async function buildFeeTx(creatorWallet, lamports) {
   return Buffer.from(tx.serialize({ requireAllSignatures: false })).toString('base64');
 }
 
-// Broadcasts the creator-signed fee transaction and confirms it landed.
-// Successful confirmation is itself the proof the creator's wallet signed it
-// — Solana rejects a transfer instruction missing the source account's
-// signature, so there's nothing further to verify.
-export async function broadcastFeeTx(signedTxBase64) {
+// Broadcasts any already-signed transaction (legacy or versioned — raw wire
+// bytes either way) and confirms it landed. Used for the fee transfer and
+// both First Buy hops. Successful confirmation of a transfer/swap is itself
+// the proof the wallet that's supposed to sign it did — Solana rejects a
+// transaction missing a required signature, so there's nothing further to
+// verify.
+export async function broadcastSignedTx(signedTxBase64, label) {
   const connection = getConnection();
   const raw = Buffer.from(signedTxBase64, 'base64');
   const txId = await connection.sendRawTransaction(raw, { skipPreflight: false });
@@ -163,12 +173,16 @@ export async function broadcastFeeTx(signedTxBase64) {
     const { value } = await connection.getSignatureStatuses([txId]);
     const status = value[0];
     if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) {
-      if (status.err) throw new Error('fee transaction failed: ' + JSON.stringify(status.err));
+      if (status.err) throw new Error(`${label} failed: ` + JSON.stringify(status.err));
       return txId;
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
-  throw new Error('fee transaction confirmation timed out: ' + txId);
+  throw new Error(`${label} confirmation timed out: ` + txId);
+}
+
+export function broadcastFeeTx(signedTxBase64) {
+  return broadcastSignedTx(signedTxBase64, 'fee transaction');
 }
 
 // Mints the coin, platform wallet pays rent + holds the full initial supply
@@ -251,4 +265,83 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     createTx: createResult?.txId ?? String(createResult),
     openTx: openResult?.txId ?? String(openResult),
   };
+}
+
+// Reads a wallet's real atomic-unit balance of `mint` — used to size First
+// Buy's second hop off what the SOL->asset swap actually delivered, instead
+// of trusting a pre-swap quote estimate that could drift from the real
+// on-chain result.
+export async function getTokenBalance(ownerWallet, mint) {
+  const connection = getConnection();
+  const ata = await getAssociatedTokenAddress(new PublicKey(mint), new PublicKey(ownerWallet));
+  try {
+    const account = await getAccount(connection, ata);
+    return new BN(account.amount.toString());
+  } catch {
+    return new BN(0);
+  }
+}
+
+// Second hop of First Buy: swap `amountIn` atomic units of the backing
+// asset for COIN, through the pool this launch already created. Built with
+// owner = the creator's bare PublicKey (no signing capability here), so it
+// comes back unsigned for them to sign themselves — the resulting COIN
+// lands directly in their own wallet, never the platform's. Follows
+// Raydium's own documented pattern for a single CLMM swap (getSwapPoolInfo
+// + swapInternal simulation for remainingAccounts/amountOutMin, then
+// clmm.swap) — see raydium-sdk-V2-demo/src/clmm/swap.ts.
+export async function buildFirstBuyTx({ poolId, coinMint, assetMint, buyerWallet, amountIn }) {
+  const connection = getConnection();
+  const buyer = new PublicKey(buyerWallet);
+  const raydium = await Raydium.load({ connection, owner: buyer, cluster: CLUSTER });
+
+  // Selling the backing asset for COIN: zeroForOne is "selling mintA for
+  // mintB", so it's true when COIN is mintB (we're spending mintA), false
+  // when COIN is mintA (we're spending mintB) — same mintA/mintB ordering
+  // rule used when the pool was created (calibration.mjs isCoinMintA).
+  const coinIsMintA = isCoinMintA(coinMint, assetMint);
+  const zeroForOne = !coinIsMintA;
+
+  const { poolInfo, rpcData, configInfo, tickArrays } = await raydium.clmm.getSwapPoolInfo(poolId, zeroForOne);
+  const programId = new PublicKey(poolInfo.programId);
+  const poolIdPub = new PublicKey(poolInfo.id);
+
+  const bitmapExtensionAddr = getPdaExBitmapAccount(programId, poolIdPub).publicKey;
+  const bitmapExtensionAccount = await connection.getAccountInfo(bitmapExtensionAddr);
+  const tickarrayBitmapExtension = TickArrayBitmapExtensionLayout.decode(bitmapExtensionAccount.data);
+
+  const simulation = swapInternal({
+    programId,
+    poolId: poolIdPub,
+    poolInfo: rpcData,
+    tickArrays,
+    configInfo,
+    tickarrayBitmapExtension,
+    amountSpecified: amountIn,
+    sqrtPriceLimitX64: new BN(0),
+    zeroForOne,
+    isBaseInput: true,
+    blockTimestamp: Math.floor(Date.now() / 1000),
+    includeExtraTickArrays: true,
+  });
+
+  // 1% slippage buffer under the simulated output — real execution price
+  // can drift slightly between simulation and confirmation.
+  const amountOutMin = simulation.amountCalculated.muln(99).divn(100);
+  const inputMint = zeroForOne ? poolInfo.mintA.address : poolInfo.mintB.address;
+
+  const { transaction, signers } = await raydium.clmm.swap({
+    poolInfo,
+    inputMint,
+    amountIn,
+    amountOutMin,
+    observationId: rpcData.observationId,
+    ownerInfo: { useSOLBalance: true },
+    remainingAccounts: simulation.accounts,
+    txVersion: TxVersion.V0,
+    feePayer: buyer,
+  });
+
+  if (signers.length) transaction.sign(signers);
+  return Buffer.from(transaction.serialize()).toString('base64');
 }

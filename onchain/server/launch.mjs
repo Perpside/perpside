@@ -7,12 +7,17 @@ import {
   createPoolAndPosition,
   buildFeeTx,
   broadcastFeeTx,
+  broadcastSignedTx,
+  buildFirstBuyTx,
+  getTokenBalance,
   calculateLaunchFeeLamports,
   redactSecrets,
   CLUSTER,
+  TOTAL_SUPPLY_WHOLE,
 } from './solana.mjs';
+import { getSwapQuote, buildSwapTx, SOL_MINT } from './jupiter.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
-import { insertToken, insertPool, updateTokenStatus, updateTokenMedia } from './db.mjs';
+import { insertToken, insertPool, updateTokenStatus, updateTokenMedia, updateFirstBuy, getToken } from './db.mjs';
 import { splitSupplyEvenly } from './calibration.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,7 +93,11 @@ export function prepareFee({ creatorWallet, assetSymbols }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
   assertAssets(assetSymbols);
   const feeLamports = calculateLaunchFeeLamports(assetSymbols.length);
-  return buildFeeTx(creatorWallet, feeLamports).then((txBase64) => ({ txBase64, feeLamports }));
+  // `cluster` tells the frontend which network this transaction was built
+  // against, so it can pass the matching Wallet Standard `chain` string
+  // when asking for a signature — hardcoding that client-side would silently
+  // go stale the moment CLUSTER flips.
+  return buildFeeTx(creatorWallet, feeLamports).then((txBase64) => ({ txBase64, feeLamports, cluster: CLUSTER }));
 }
 
 // Step 2: broadcast the creator-signed fee tx, confirm it landed (that
@@ -163,4 +172,80 @@ export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, cr
 
 export function listBackingAssets() {
   return backingAssets;
+}
+
+// Economics the frontend needs to estimate a First Buy's COIN payout before
+// the coin (and its pool) even exists — every launch starts at the same
+// targetFdvUsd / totalSupplyWhole price, so this is enough for a rough
+// client-side estimate without a new round trip per keystroke.
+export function getLaunchConfig() {
+  return { targetFdvUsd: DEFAULT_TARGET_FDV_USD, totalSupplyWhole: Number(TOTAL_SUPPLY_WHOLE) };
+}
+
+// First Buy: optional, creator-signed, lands COIN in the creator's own
+// wallet — never the platform's. Our pools only pair COIN against
+// xSOL/xBTC/xHYPE, not native SOL, so this is unavoidably two hops:
+//   1. SOL -> backing asset, via Jupiter (mainnet-only — Jupiter doesn't
+//      route devnet tokens, so First Buy simply isn't available there).
+//   2. backing asset -> COIN, via the pool this launch just created.
+// Two separate creator signatures rather than one combined transaction —
+// composing Jupiter's returned instructions with our own Raydium swap in a
+// single versioned tx (shared address-lookup-tables, exact accounts) is
+// real complexity for a UX win (one popup instead of two) on a feature
+// that's opt-in to begin with. Each hop reuses the same
+// prepare-unsigned-tx -> sign -> broadcast pattern as the launch fee.
+function firstBuyPool(mint) {
+  const token = getToken(mint);
+  if (!token || !token.pools.length) throw new LaunchValidationError('unknown or incomplete launch');
+  return token.pools[0]; // whichever backing asset was picked first
+}
+
+export async function prepareFirstBuyHop1({ mint, buyerWallet, solLamports }) {
+  if (CLUSTER !== 'mainnet-beta') {
+    throw new LaunchValidationError('First Buy needs mainnet — Jupiter has no devnet liquidity to route through');
+  }
+  if (!buyerWallet) throw new LaunchValidationError('connect a wallet before buying');
+  if (!solLamports || solLamports <= 0) throw new LaunchValidationError('invalid first-buy amount');
+
+  const pool = firstBuyPool(mint);
+  const quote = await getSwapQuote({ inputMint: SOL_MINT, outputMint: pool.backing_asset_mint, amountLamports: solLamports });
+  const txBase64 = await buildSwapTx({ quoteResponse: quote, userPublicKey: buyerWallet });
+  return { txBase64, cluster: CLUSTER };
+}
+
+export function broadcastFirstBuyHop1({ signedTxBase64 }) {
+  if (!signedTxBase64) throw new LaunchValidationError('signed transaction is required');
+  return broadcastSignedTx(signedTxBase64, 'first-buy swap (hop 1)').then((txId) => ({ txId }));
+}
+
+export async function prepareFirstBuyHop2({ mint, buyerWallet }) {
+  // No CLUSTER gate here — unlike hop 1, this is pure Raydium pool
+  // interaction with no Jupiter dependency, so it's cluster-agnostic. In
+  // the normal flow it's only ever reached after hop 1 succeeds (which
+  // *is* mainnet-gated), but that's a frontend sequencing fact, not
+  // something this function needs to assume.
+  if (!buyerWallet) throw new LaunchValidationError('connect a wallet before buying');
+
+  const pool = firstBuyPool(mint);
+  // Spend whatever hop 1 actually delivered, not the pre-swap quote's
+  // estimate — reading the real post-hop-1 balance means hop 2 can never
+  // ask for more than the wallet actually holds.
+  const amountIn = await getTokenBalance(buyerWallet, pool.backing_asset_mint);
+  if (amountIn.isZero()) throw new LaunchValidationError('no balance to buy with — did the first swap land?');
+
+  const txBase64 = await buildFirstBuyTx({
+    poolId: pool.pool_address,
+    coinMint: mint,
+    assetMint: pool.backing_asset_mint,
+    buyerWallet,
+    amountIn,
+  });
+  return { txBase64, cluster: CLUSTER };
+}
+
+export async function broadcastFirstBuyHop2({ mint, signedTxBase64, solLamportsSpent }) {
+  if (!signedTxBase64) throw new LaunchValidationError('signed transaction is required');
+  const txId = await broadcastSignedTx(signedTxBase64, 'first-buy swap (hop 2)');
+  updateFirstBuy(mint, solLamportsSpent ?? null);
+  return { txId };
 }

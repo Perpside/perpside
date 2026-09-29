@@ -69,6 +69,10 @@ export function updateTokenMedia(mintAddress, imageUrl, metadataUri) {
     .run(imageUrl ?? null, metadataUri ?? null, mintAddress);
 }
 
+export function updateFirstBuy(mintAddress, lamports) {
+  db.prepare('UPDATE tokens SET first_buy_lamports = ? WHERE mint_address = ?').run(lamports, mintAddress);
+}
+
 export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice }) {
   db.prepare(`
     INSERT INTO token_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, position_nft_mint, tick_lower, tick_upper, initial_price, created_at)

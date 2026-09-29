@@ -202,9 +202,11 @@ For each chosen backing asset:
 
 1. Get its current USD price from Jupiter's Price API (already used
    client-side for the asset search — same API, now called server-side).
-2. Decide a target starting valuation for the coin (e.g. fixed at launch, or
-   derived from `firstBuy` if provided — TBD, doesn't block building the
-   plumbing).
+2. Decide a target starting valuation for the coin — resolved as a fixed
+   constant (`DEFAULT_TARGET_FDV_USD` in `launch.mjs`), same for every
+   launch. First Buy does *not* feed into this: it's a separate, optional
+   swap that happens after the pools already exist, not a launch-time input
+   — see "First Buy" further down.
 3. Convert that USD valuation into "COIN per unit of backing asset" and derive
    the pool's initial `sqrt_price` / starting tick from it.
 4. Size the single-sided COIN position (which tick range, how much supply)
@@ -416,3 +418,77 @@ addresses involved:
   back. Acceptable for now since the fee removes the *free* spam vector,
   which was the actual problem; a cooldown could be layered on later if
   needed.
+
+## First Buy: real, creator-signed, two hops (2026-09-29)
+
+Previously purely cosmetic — the amount typed into the form only fed the
+local `PerpsideTokens.add(...)` preview, never reached the backend, and
+`tokens.first_buy_lamports` was always inserted as `null`. Now it's a real
+on-chain purchase, same principle as the launch fee: **creator signs, COIN
+lands in their own wallet**, not the platform's.
+
+**Why two hops, not one.** Our pools only ever pair COIN against
+xSOL/xBTC/xHYPE — never native SOL — so turning a SOL amount into COIN is
+unavoidably: (1) SOL → backing asset, (2) backing asset → COIN. Considered
+composing both into one versioned transaction (Jupiter's instructions +
+our own Raydium swap instruction, one signature) but went with two separate
+signed transactions instead:
+- Hop 2's input amount is read from the creator's **real post-hop-1
+  balance** (`getTokenBalance` in `solana.mjs`) rather than trusting hop 1's
+  pre-swap quote — this fully sidesteps any slippage-estimation mismatch
+  between the two hops, at the cost of one extra wallet popup. Given First
+  Buy is opt-in to begin with, correctness over one fewer click.
+- Composing a third-party aggregator's instructions with our own in a single
+  versioned tx (shared address-lookup-tables, exact account ordering) is
+  real complexity for a UX win on an optional feature — not worth it yet.
+
+**Hop 1 (SOL → backing asset) is mainnet-only.** Jupiter doesn't index or
+route devnet tokens at all (confirmed directly — quoting our devnet xSOL
+stand-in returns `TOKEN_NOT_TRADABLE`); `prepareFirstBuyHop1` in
+`launch.mjs` refuses with a clear `LaunchValidationError` on any other
+cluster. Uses Jupiter's public swap API (`lite-api.jup.ag/swap/v1`
+`quote` + `swap`) — the same host already used for token search — which
+hands back a ready-to-sign transaction with `feePayer` already set to the
+creator, no building required on our side.
+
+**Hop 2 (backing asset → COIN) is our own Raydium CLMM swap**, built with
+`owner` = the creator's bare `PublicKey` (same unsigned-tx-before-`.execute()`
+pattern used everywhere else a creator signs), following Raydium's own
+documented single-pool-swap pattern exactly
+(`raydium-sdk-V2-demo/src/clmm/swap.ts`: `clmm.getSwapPoolInfo` →
+`getPdaExBitmapAccount` + fetch/decode the bitmap extension →
+`swapInternal` to simulate `remainingAccounts`/`amountOutMin` → `clmm.swap`).
+This method needed lower-level manual account wiring than `createPool`/
+`openPositionFromBase` — there's no single convenience call for it.
+`amountOutMin` is the simulated output with a 1% haircut, not the exact
+simulated value, so small price drift between simulation and confirmation
+doesn't fail the swap outright.
+
+**Verified for real on devnet** (hop 2 only — hop 1 categorically can't run
+there, see above): pointed it at an existing pool from earlier testing,
+had the test creator wallet spend its entire real xSOL balance (~10 xSOL)
+through `/api/launch/first-buy/hop2-tx` → sign → `/api/launch/first-buy/hop2`.
+Confirmed on-chain: xSOL balance went to zero, COIN landed directly in the
+creator's own wallet (not the platform's), and `first_buy_lamports` was
+recorded in the DB correctly. Hop 1 is implemented against Jupiter's
+documented API contract and that contract was verified live (real quote +
+real ready-to-sign transaction for a live mainnet pair), but the actual
+sign-and-broadcast path has not been exercised against real mainnet funds.
+
+**New endpoints:** `GET /api/launch-config` (`{targetFdvUsd,
+totalSupplyWhole}` — every launch starts at the same price, so the frontend
+uses this + a live SOL/USD price from Jupiter to show a live "≈ N COIN"
+estimate as the creator types an amount, clearly labeled as an estimate
+before fees/slippage) and the four-route `/api/launch/first-buy/{hop1,hop2}{-tx,}`
+pair. Also fixed a real, adjacent bug while building this: the Wallet
+Standard `chain` parameter for `solana:signTransaction` was hardcoded to
+`'solana:devnet'` everywhere, including the original launch-fee signing
+call — silently wrong the moment `CLUSTER` flips to `mainnet-beta`.
+`prepareFee`/both first-buy prepare functions now return `cluster: CLUSTER`
+alongside the unsigned tx, and the frontend picks the matching chain string
+off that instead of a hardcoded guess.
+
+A failed First Buy never undoes the launch itself, which has already
+succeeded by the time First Buy runs — it surfaces as a distinct
+non-blocking message ("Coin launched, but First Buy failed: ... — you can
+still buy it from Explore") rather than the main launch-failure error.

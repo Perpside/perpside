@@ -3,7 +3,17 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { launchToken, prepareFee, listBackingAssets, LaunchValidationError } from './launch.mjs';
+import {
+  launchToken,
+  prepareFee,
+  listBackingAssets,
+  getLaunchConfig,
+  prepareFirstBuyHop1,
+  broadcastFirstBuyHop1,
+  prepareFirstBuyHop2,
+  broadcastFirstBuyHop2,
+  LaunchValidationError,
+} from './launch.mjs';
 import { listTokens, getToken } from './db.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +37,10 @@ app.get('/api/backing-assets', (req, res) => {
   res.json(listBackingAssets());
 });
 
+app.get('/api/launch-config', (req, res) => {
+  res.json(getLaunchConfig());
+});
+
 app.get('/api/tokens', (req, res) => {
   res.json(listTokens());
 });
@@ -37,47 +51,46 @@ app.get('/api/tokens/:mint', (req, res) => {
   res.json(token);
 });
 
+// Shared response handling for every /api/launch* route: LaunchValidationError
+// is deliberately user-facing (400, shown as-is); anything else is an
+// unexpected failure — logged in full server-side, but the client only ever
+// gets a generic message (see index.mjs's earlier client-exposure audit —
+// an unexpected error's .message can carry internal details, e.g. the RPC
+// URL with our API key, that have no business reaching the browser).
+function apiRoute(handler, failMessage) {
+  return async (req, res) => {
+    try {
+      res.json(await handler(req.body));
+    } catch (err) {
+      if (err instanceof LaunchValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error(err);
+      res.status(500).json({ error: failMessage });
+    }
+  };
+}
+
 // Step 1: build the launch fee transfer, sized to how many backing assets
 // were picked. Nothing is charged or persisted yet — the creator's wallet
 // still has to sign and the fee still has to land before /api/launch does
 // anything.
-app.post('/api/launch/fee-tx', async (req, res) => {
-  try {
-    const { creatorWallet, assetSymbols } = req.body;
-    const result = await prepareFee({ creatorWallet, assetSymbols });
-    res.json(result);
-  } catch (err) {
-    if (err instanceof LaunchValidationError) {
-      return res.status(400).json({ error: err.message });
-    }
-    // Unlike LaunchValidationError (deliberately user-facing), an
-    // unexpected error's .message is never sent to the client — it can
-    // carry internal details (e.g. the RPC URL, which embeds our API key)
-    // that have no business reaching the browser. Full error stays in the
-    // server logs only.
-    console.error(err);
-    res.status(500).json({ error: 'fee-tx failed' });
-  }
-});
+app.post('/api/launch/fee-tx', apiRoute(prepareFee, 'fee-tx failed'));
 
 // Step 2: broadcasts the signed fee payment, then — only once that's
 // confirmed — mints the coin and creates 1-3 calibrated pools, platform-
 // sponsored. See launch.mjs.
-app.post('/api/launch', async (req, res) => {
-  try {
-    const { name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64 } = req.body;
-    const result = await launchToken({ name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64 });
-    res.json(result);
-  } catch (err) {
-    if (err instanceof LaunchValidationError) {
-      return res.status(400).json({ error: err.message });
-    }
-    // Same reasoning as /api/launch/fee-tx above — no internal error
-    // detail to the client on an unexpected failure.
-    console.error(err);
-    res.status(500).json({ error: 'launch failed' });
-  }
-});
+app.post('/api/launch', apiRoute(launchToken, 'launch failed'));
+
+// First Buy (optional): two creator-signed hops so the resulting COIN lands
+// in their own wallet — SOL -> backing asset via Jupiter, then backing
+// asset -> COIN via the pool /api/launch just created. Mainnet-only (see
+// launch.mjs). Each hop is prepare (build unsigned tx) then broadcast
+// (send the signed tx), same shape as /api/launch/fee-tx + /api/launch.
+app.post('/api/launch/first-buy/hop1-tx', apiRoute(prepareFirstBuyHop1, 'first-buy hop1 failed'));
+app.post('/api/launch/first-buy/hop1', apiRoute(broadcastFirstBuyHop1, 'first-buy hop1 broadcast failed'));
+app.post('/api/launch/first-buy/hop2-tx', apiRoute(prepareFirstBuyHop2, 'first-buy hop2 failed'));
+app.post('/api/launch/first-buy/hop2', apiRoute(broadcastFirstBuyHop2, 'first-buy hop2 broadcast failed'));
 
 // Same service also serves the static landing page/dashboard (index.html,
 // assets/) — one Railway service, one domain, no separate CORS story for

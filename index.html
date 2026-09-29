@@ -1327,6 +1327,12 @@
     color: var(--color-ink-muted);
   }
 
+  .launch-first-buy-estimate {
+    margin: 0.5rem 0 0;
+    font-size: 0.8125rem;
+    color: var(--color-ink-muted);
+  }
+
   .launch-input {
     width: 100%;
     padding: 0.7rem 0.9rem;
@@ -2041,6 +2047,7 @@
                 <div class="launch-links-panel" id="launchFirstBuyPanel" hidden>
                   <label class="launch-label" for="launchFirstBuyAmount">Amount (SOL)</label>
                   <input type="number" id="launchFirstBuyAmount" class="launch-input" placeholder="0.0" min="0" step="0.01" inputmode="decimal" autocomplete="off">
+                  <p class="launch-first-buy-estimate" id="launchFirstBuyEstimate" hidden></p>
                 </div>
               </div>
 
@@ -3010,6 +3017,82 @@
         });
       }
 
+      // First Buy live estimate — every launch starts at the same
+      // targetFdvUsd / totalSupplyWhole price (see /api/launch-config), so
+      // this is enough for a rough "you'll get about this many coins"
+      // preview before the coin (and its pool) even exists. Not a quote:
+      // ignores swap fees and any price impact from the buy itself.
+      var launchConfigCache = null;
+      function fetchLaunchConfig() {
+        if (launchConfigCache) return Promise.resolve(launchConfigCache);
+        return fetch(LAUNCH_API_URL + '/api/launch-config').then(function (res) { return res.json(); }).then(function (data) {
+          launchConfigCache = data;
+          return data;
+        });
+      }
+
+      var solPriceCache = null;
+      var solPriceCacheAt = 0;
+      function fetchSolUsdPrice() {
+        if (solPriceCache && Date.now() - solPriceCacheAt < 30000) return Promise.resolve(solPriceCache);
+        return fetch('https://lite-api.jup.ag/tokens/v2/search?query=So11111111111111111111111111111111111111112')
+          .then(function (res) { return res.json(); })
+          .then(function (results) {
+            var sol = Array.isArray(results) ? results[0] : null;
+            var price = sol && typeof sol.usdPrice === 'number' ? sol.usdPrice : null;
+            if (price) { solPriceCache = price; solPriceCacheAt = Date.now(); }
+            return price;
+          });
+      }
+
+      function formatCoinEstimate(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return Math.round(n).toString();
+      }
+
+      var firstBuyAmountInput = document.getElementById('launchFirstBuyAmount');
+      var firstBuyEstimateEl = document.getElementById('launchFirstBuyEstimate');
+      var firstBuyEstimateDebounce = null;
+
+      function updateFirstBuyEstimate() {
+        if (!firstBuyEstimateEl || !firstBuyAmountInput) return;
+        var amount = parseFloat(firstBuyAmountInput.value);
+        if (!amount || amount <= 0 || isNaN(amount)) {
+          firstBuyEstimateEl.hidden = true;
+          return;
+        }
+
+        var ticker = (document.getElementById('launchTicker').value || '').trim().toUpperCase() || 'coins';
+        firstBuyEstimateEl.hidden = false;
+        firstBuyEstimateEl.textContent = 'Estimating…';
+
+        Promise.all([fetchLaunchConfig(), fetchSolUsdPrice()]).then(function (results) {
+          var config = results[0], solPrice = results[1];
+          if (!solPrice) {
+            firstBuyEstimateEl.textContent = 'Could not estimate right now — try again shortly.';
+            return;
+          }
+          var coinStartPriceUsd = config.targetFdvUsd / config.totalSupplyWhole;
+          var usdValue = amount * solPrice;
+          // Rough haircut for the two pool-fee hops (SOL -> asset,
+          // asset -> COIN) — the real amount also depends on live slippage
+          // at swap time, so this stays an estimate, not a quote.
+          var estimatedCoins = (usdValue / coinStartPriceUsd) * 0.99;
+          firstBuyEstimateEl.textContent = '≈ ' + formatCoinEstimate(estimatedCoins) + ' ' + ticker + ' (estimate — before fees/slippage)';
+        }).catch(function () {
+          firstBuyEstimateEl.textContent = 'Could not estimate right now — try again shortly.';
+        });
+      }
+
+      if (firstBuyAmountInput) {
+        firstBuyAmountInput.addEventListener('input', function () {
+          if (firstBuyEstimateDebounce) clearTimeout(firstBuyEstimateDebounce);
+          firstBuyEstimateDebounce = setTimeout(updateFirstBuyEstimate, 300);
+        });
+      }
+
       var linksToggle = document.getElementById('launchLinksToggle');
       var linksPanel = document.getElementById('launchLinksPanel');
       if (linksToggle && linksPanel) {
@@ -3053,6 +3136,7 @@
         if (linksToggle) linksToggle.classList.remove('is-open');
         if (firstBuyPanel) firstBuyPanel.hidden = true;
         if (firstBuyToggle) firstBuyToggle.classList.remove('is-open');
+        if (firstBuyEstimateEl) firstBuyEstimateEl.hidden = true;
         updatePreview();
       }
 
@@ -3113,11 +3197,54 @@
           return signFeature.signTransaction({
             account: account,
             transaction: base64ToBytes(fee.txBase64),
-            chain: 'solana:devnet'
+            chain: fee.cluster === 'mainnet-beta' ? 'solana:mainnet' : 'solana:devnet'
           }).then(function (outputs) {
             return bytesToBase64(outputs[0].signedTransaction);
           });
         });
+      }
+
+      // First Buy (optional): two creator-signed hops so the resulting COIN
+      // lands in the creator's own wallet, never the platform's — our pools
+      // pair COIN against xSOL/xBTC/xHYPE, not native SOL, so getting there
+      // from a SOL amount always takes two swaps:
+      //   1. SOL -> backing asset, via Jupiter (mainnet-only).
+      //   2. backing asset -> COIN, via the pool /api/launch just created.
+      // Failure here never undoes the launch itself, which already
+      // succeeded — see the submit handler's separate catch for this step.
+      function signAndBroadcast(prepareResult, broadcastPath, extraBody) {
+        var wallet = window.__perpsideConnectedWallet;
+        var account = window.__perpsideConnectedAccount;
+        if (!wallet || !account) return Promise.reject(new Error('Wallet disconnected — reconnect and try again.'));
+        var signFeature = wallet.features && wallet.features['solana:signTransaction'];
+        if (!signFeature) return Promise.reject(new Error('Connected wallet does not support signing transactions.'));
+
+        return signFeature.signTransaction({
+          account: account,
+          transaction: base64ToBytes(prepareResult.txBase64),
+          chain: prepareResult.cluster === 'mainnet-beta' ? 'solana:mainnet' : 'solana:devnet'
+        }).then(function (outputs) {
+          var body = { signedTxBase64: bytesToBase64(outputs[0].signedTransaction) };
+          for (var key in extraBody) body[key] = extraBody[key];
+          return apiCall(broadcastPath, body);
+        });
+      }
+
+      function performFirstBuy(creatorWallet, mint, solAmount) {
+        var solLamports = Math.round(solAmount * 1e9);
+
+        if (submitLabel) submitLabel.textContent = 'First buy — swap 1 of 2…';
+        return apiCall('/api/launch/first-buy/hop1-tx', { mint: mint, buyerWallet: creatorWallet, solLamports: solLamports })
+          .then(function (hop1) {
+            return signAndBroadcast(hop1, '/api/launch/first-buy/hop1', {});
+          })
+          .then(function () {
+            if (submitLabel) submitLabel.textContent = 'First buy — swap 2 of 2…';
+            return apiCall('/api/launch/first-buy/hop2-tx', { mint: mint, buyerWallet: creatorWallet });
+          })
+          .then(function (hop2) {
+            return signAndBroadcast(hop2, '/api/launch/first-buy/hop2', { mint: mint, solLamportsSpent: solLamports });
+          });
       }
 
       form.addEventListener('submit', function (e) {
@@ -3195,9 +3322,20 @@
               }
             });
 
-            resetForm();
-            if (window.showAppPage) window.showAppPage('earn');
-            if (window.renderExploreGrid) window.renderExploreGrid();
+            // The launch itself already succeeded at this point — a First
+            // Buy failure shouldn't read as the whole launch failing, so it
+            // gets its own non-blocking message instead of the outer catch.
+            var firstBuyDone = (!isNaN(firstBuyAmount) && firstBuyAmount > 0)
+              ? performFirstBuy(creatorWallet, data.mint, firstBuyAmount).catch(function (err) {
+                  showLaunchError('Coin launched, but First Buy failed: ' + (err.message || 'unknown error') + ' — you can still buy it from Explore.');
+                })
+              : Promise.resolve();
+
+            return firstBuyDone.then(function () {
+              resetForm();
+              if (window.showAppPage) window.showAppPage('earn');
+              if (window.renderExploreGrid) window.renderExploreGrid();
+            });
           })
           .catch(function (err) {
             showLaunchError(err.message || 'Launch failed — is the launch service running?');

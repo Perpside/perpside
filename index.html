@@ -1173,7 +1173,6 @@
     font-size: 0.6875rem;
     font-weight: 600;
     color: var(--color-ink-muted);
-    text-transform: uppercase;
   }
 
   .header-launch-btn {
@@ -2660,7 +2659,7 @@
       function updatePreview() {
         if (!previewGrid || !window.renderTokenCard) return;
         var name = document.getElementById('launchName').value.trim();
-        var ticker = document.getElementById('launchTicker').value.trim().toUpperCase();
+        var ticker = document.getElementById('launchTicker').value.trim();
         var x = document.getElementById('launchX').value.trim();
         var telegram = document.getElementById('launchTelegram').value.trim();
         var website = document.getElementById('launchWebsite').value.trim();
@@ -3064,7 +3063,7 @@
           return;
         }
 
-        var ticker = (document.getElementById('launchTicker').value || '').trim().toUpperCase() || 'coins';
+        var ticker = (document.getElementById('launchTicker').value || '').trim() || 'coins';
         firstBuyEstimateEl.hidden = false;
         firstBuyEstimateEl.textContent = 'Estimating…';
 
@@ -3251,7 +3250,7 @@
         e.preventDefault();
 
         var name = document.getElementById('launchName').value.trim();
-        var ticker = document.getElementById('launchTicker').value.trim().toUpperCase();
+        var ticker = document.getElementById('launchTicker').value.trim();
         var x = document.getElementById('launchX').value.trim();
         var telegram = document.getElementById('launchTelegram').value.trim();
         var website = document.getElementById('launchWebsite').value.trim();

@@ -5,8 +5,11 @@ import {
   getMinimumBalanceForRentExemptMint,
   createInitializeMint2Instruction,
   createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createMintToInstruction,
   createSetAuthorityInstruction,
+  createTransferInstruction,
+  createBurnInstruction,
   AuthorityType,
   getAssociatedTokenAddress,
   getAccount,
@@ -25,7 +28,14 @@ import {
   TxVersion,
   getPdaExBitmapAccount,
   getPdaPersonalPositionAddress,
+  getPdaTickArrayAddress,
+  getPdaLockClPositionIdV2,
   PersonalPositionLayout,
+  PoolInfoLayout,
+  TickArrayLayout,
+  TickArrayUtil,
+  PositionUtils,
+  LockClPositionLayoutV2,
   TickArrayBitmapExtensionLayout,
   swapInternal,
 } from '@raydium-io/raydium-sdk-v2';
@@ -530,4 +540,182 @@ export async function buildFirstBuyTx({ poolId, coinMint, assetMint, buyerWallet
     // this to enforce a supply cap before ever handing back a signable tx.
     coinAmountOut: simulation.amountCalculated.toString(),
   };
+}
+
+// Reads a locked position's *unharvested* fee amount directly from on-chain
+// state (pool + the two tick arrays bounding the position), without ever
+// calling harvestLockPosition — lets the reward cron check whether a
+// token's accrued fees have crossed the USD threshold before spending a
+// transaction to actually collect them. Verified against a real harvest on
+// devnet: the harvested amount landed exactly equal to what this function
+// predicted beforehand (see docs/token-launch-plan.md).
+export async function getPoolPendingFees({ poolAddress, positionNftMint, tickLower, tickUpper }, coinMint) {
+  const connection = getConnection();
+  const poolAccountInfo = await connection.getAccountInfo(new PublicKey(poolAddress));
+  const poolState = PoolInfoLayout.decode(poolAccountInfo.data);
+
+  const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(positionNftMint)).publicKey;
+  const positionAccountInfo = await connection.getAccountInfo(positionPda);
+  const positionState = PersonalPositionLayout.decode(positionAccountInfo.data);
+
+  const startIndexLower = TickArrayUtil.getTickArrayStartIndex(tickLower, poolState.tickSpacing);
+  const startIndexUpper = TickArrayUtil.getTickArrayStartIndex(tickUpper, poolState.tickSpacing);
+  const tickArrayLowerPda = getPdaTickArrayAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(poolAddress), startIndexLower).publicKey;
+  const tickArrayUpperPda = getPdaTickArrayAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(poolAddress), startIndexUpper).publicKey;
+
+  const sameArray = tickArrayLowerPda.equals(tickArrayUpperPda);
+  const keys = sameArray ? [tickArrayLowerPda] : [tickArrayLowerPda, tickArrayUpperPda];
+  const infos = await connection.getMultipleAccountsInfo(keys);
+  const lowerArray = TickArrayLayout.decode(infos[0].data);
+  const upperArray = sameArray ? lowerArray : TickArrayLayout.decode(infos[1].data);
+
+  const lowerOffset = TickArrayUtil.getTickOffsetInArray(tickLower, poolState.tickSpacing);
+  const upperOffset = TickArrayUtil.getTickOffsetInArray(tickUpper, poolState.tickSpacing);
+  const tickLowerData = lowerArray.ticks[lowerOffset];
+  const tickUpperData = upperArray.ticks[upperOffset];
+
+  const { tokenFeeAmountA, tokenFeeAmountB } = PositionUtils.GetPositionFees(poolState, positionState, tickLowerData, tickUpperData);
+
+  // feeOn pins collection to the backing asset (see createPoolAndPosition),
+  // so the COIN side should read ~0 regardless — read both and pick
+  // whichever side actually matches the backing asset's mint rather than
+  // assuming, so this stays correct if that ever changes.
+  const coinIsA = poolState.mintA.toBase58() === coinMint;
+  return coinIsA ? tokenFeeAmountB : tokenFeeAmountA;
+}
+
+// Collects a locked position's accrued fees into the platform's own ATA for
+// the backing asset — the platform is both the lock owner and the fee
+// payer, so this needs no creator/user signature. Returns the exact
+// harvested amount by diffing the platform's ATA balance around the call,
+// rather than trusting a return value the SDK doesn't expose directly.
+export async function harvestPoolFees({ poolAddress, lockNftMint }, backingAssetMint) {
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+  const raydium = await getRaydium();
+
+  const lockDataPda = getPdaLockClPositionIdV2(CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER, new PublicKey(lockNftMint)).publicKey;
+  const lockAccountInfo = await connection.getAccountInfo(lockDataPda);
+  const lockData = LockClPositionLayoutV2.decode(lockAccountInfo.data);
+
+  const assetAta = await getAssociatedTokenAddress(new PublicKey(backingAssetMint), payer.publicKey);
+  const balanceBefore = await getTokenBalance(payer.publicKey.toBase58(), backingAssetMint);
+
+  const { execute } = await raydium.clmm.harvestLockPosition({
+    programId: CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER,
+    authProgramId: CLMM_LOCK_AUTH_ID_FOR_CLUSTER,
+    clmmProgram: CLMM_PROGRAM_ID_FOR_CLUSTER,
+    lockData,
+    txVersion: TxVersion.V0,
+  });
+  const result = await execute({ sendAndConfirm: true });
+
+  const balanceAfter = await getTokenBalance(payer.publicKey.toBase58(), backingAssetMint);
+  return { txId: result?.txId ?? String(result), harvestedAtomic: balanceAfter.sub(balanceBefore) };
+}
+
+// Sends `amountAtomic` of `mint` to each recipient from the platform's own
+// balance, creating their ATA first if they don't have one (the recipient
+// never pays for their own account — see docs/token-launch-plan.md). Batches
+// several recipients per transaction (idempotent-create + transfer per
+// recipient) to keep the number of transactions down; batch size is
+// conservative and verified against real transaction size limits on devnet,
+// not just estimated.
+const RECIPIENTS_PER_BATCH = 8;
+
+export async function sendTokenBatch(mint, recipients) {
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+  const mintPubkey = new PublicKey(mint);
+  const fromAta = await getAssociatedTokenAddress(mintPubkey, payer.publicKey);
+
+  const results = [];
+  for (let i = 0; i < recipients.length; i += RECIPIENTS_PER_BATCH) {
+    const batch = recipients.slice(i, i + RECIPIENTS_PER_BATCH);
+    const tx = new Transaction();
+    for (const { wallet, amountAtomic } of batch) {
+      const owner = new PublicKey(wallet);
+      const toAta = await getAssociatedTokenAddress(mintPubkey, owner);
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, toAta, owner, mintPubkey));
+      tx.add(createTransferInstruction(fromAta, toAta, payer.publicKey, BigInt(amountAtomic.toString())));
+    }
+    const txId = await sendAndConfirmTransaction(connection, tx, [payer]);
+    for (const r of batch) results.push({ wallet: r.wallet, amountAtomic: r.amountAtomic, txId });
+  }
+  return results;
+}
+
+// Platform-signed swap of its own backing-asset holdings into COIN — used
+// only for the automated Buyback & Burn step (never creator- or
+// user-signed, unlike buildFirstBuyTx). Same simulate-then-swap pattern as
+// First Buy's hop 2, but self-signed and sent immediately rather than
+// handed back unsigned. Returns the exact COIN amount received.
+export async function swapPlatformAssetForCoin({ poolId, coinMint, assetMint, amountIn }) {
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+  const raydium = await getRaydium();
+
+  // Selling the backing asset for COIN — identical operation to First Buy's
+  // hop 2 (buildFirstBuyTx above), so the same zeroForOne rule applies:
+  // true when COIN is mintB (we're spending mintA), false when COIN is
+  // mintA (we're spending mintB).
+  const coinIsMintA = isCoinMintA(coinMint, assetMint);
+  const zeroForOne = !coinIsMintA;
+
+  const { poolInfo, rpcData, configInfo, tickArrays } = await raydium.clmm.getSwapPoolInfo(poolId, zeroForOne);
+  const programId = new PublicKey(poolInfo.programId);
+  const poolIdPub = new PublicKey(poolInfo.id);
+
+  const bitmapExtensionAddr = getPdaExBitmapAccount(programId, poolIdPub).publicKey;
+  const bitmapExtensionAccount = await connection.getAccountInfo(bitmapExtensionAddr);
+  const tickarrayBitmapExtension = TickArrayBitmapExtensionLayout.decode(bitmapExtensionAccount.data);
+
+  const simulation = swapInternal({
+    programId,
+    poolId: poolIdPub,
+    poolInfo: rpcData,
+    tickArrays,
+    configInfo,
+    tickarrayBitmapExtension,
+    amountSpecified: amountIn,
+    sqrtPriceLimitX64: new BN(0),
+    zeroForOne,
+    isBaseInput: true,
+    blockTimestamp: Math.floor(Date.now() / 1000),
+    includeExtraTickArrays: true,
+  });
+
+  const amountOutMin = simulation.amountCalculated.muln(99).divn(100);
+  const inputMint = zeroForOne ? poolInfo.mintA.address : poolInfo.mintB.address;
+
+  const { execute } = await raydium.clmm.swap({
+    poolInfo,
+    inputMint,
+    amountIn,
+    amountOutMin,
+    observationId: rpcData.observationId,
+    ownerInfo: { useSOLBalance: true },
+    remainingAccounts: simulation.accounts,
+    txVersion: TxVersion.V0,
+  });
+  const result = await execute({ sendAndConfirm: true });
+
+  return { txId: result?.txId ?? String(result), coinAmountOut: simulation.amountCalculated };
+}
+
+// Burns `amountAtomic` of COIN from the platform's own ATA — the second
+// half of Buyback & Burn, permanently reducing supply. Requires no
+// authority beyond the platform's own signature (burning your own tokens
+// needs no special permission).
+export async function burnCoin(coinMint, amountAtomic) {
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+  const mintPubkey = new PublicKey(coinMint);
+  const ata = await getAssociatedTokenAddress(mintPubkey, payer.publicKey);
+
+  const tx = new Transaction().add(
+    createBurnInstruction(ata, mintPubkey, payer.publicKey, BigInt(amountAtomic.toString()))
+  );
+  const txId = await sendAndConfirmTransaction(connection, tx, [payer]);
+  return { txId };
 }

@@ -24,8 +24,9 @@ real on-chain flow. Phase 1 goal is narrow on purpose:
 
 ## Explicitly deferred (not this phase)
 
-- Collecting `creator_fee_rate` from the pools (Raydium `CollectCreatorFee`).
-- Splitting collected fees into Community / Creator / Buyback & Burn.
+- ~~Collecting `creator_fee_rate` from the pools (Raydium `CollectCreatorFee`).~~
+  ~~Splitting collected fees into Community / Creator / Buyback & Burn.~~ Built —
+  see "Reward cron: harvest + Community/Creator/Buyback distribution" below.
 - Anti-snipe protections on the first block/slot.
 - Extending a pool's tick range once it's fully depleted ("graduation" UX).
 - Any custom on-chain program. Everything here is existing programs
@@ -998,3 +999,93 @@ including on outside-click, selecting a tier updates the trigger label and
 every reward-row's "% of volume" figure, and the layout now has clear,
 consistent spacing between the fee-tier picker and the reward split —
 confirmed via screenshot, no console errors.
+
+## Reward cron: harvest + Community/Creator/Buyback distribution (2026-09-29)
+
+The reward model's split has existed since launch (see "Explicitly
+deferred") but nothing ever actually collected or paid it out — configured
+splits were saved and shown, never enforced. This builds that: a
+standalone cron (`onchain/server/reward-cron.mjs`, entry point for
+`rewards.mjs`) that wakes every 2 hours, checks every complete launch's
+*unharvested* pool fees in USD, and once a token crosses $5,000 combined
+across its pools, harvests each pool and splits the proceeds into
+Community (sent to every real holder, proportional to their balance),
+Creator (single transfer), and Buyback & Burn (swap to COIN, then burn) —
+using the same ratio the creator configured at launch time.
+
+**Key decisions (confirmed with the user before building):** all three
+destinations run in the same cron, not just Community. Each pool's
+harvested fee is distributed natively in its own backing asset (xSOL fees
+stay xSOL, xBTC stay xBTC, etc.) rather than swapping everything into one
+currency — no extra swap risk in an unattended job. Holders below $1 of
+computed share are skipped (ATA rent + tx fee would cost more than the
+payout); the skipped amount stays in the platform's wallet rather than
+being reharvested later, since a locked position's harvest is all-or-
+nothing — there's no partial amount left sitting in the pool to catch on a
+future pass.
+
+**Reading fees before spending a transaction to collect them.** A locked
+position's `tokenFeesOwed*` fields are a stale cache, only updated when
+the position is touched — the real pending amount needs computing live
+from the pool's `feeGrowthGlobal` and the two boundary ticks'
+`feeGrowthOutside` (`PositionUtils.GetPositionFees` in the SDK, the same
+math the on-chain program uses). Verified for real: generated actual fee
+accrual with a real swap, read the predicted pending amount, then
+harvested and diffed the platform's ATA balance — the harvested amount
+matched the predicted amount exactly, both before and after fixing a
+missing `clmmProgram` param on devnet (`harvestLockPosition` silently
+defaults it to the *mainnet* CLMM program if omitted, which throws
+`InvalidProgramId` against a devnet pool).
+
+**Finding real holders.** `getProgramAccounts` filtered by mint + 165-byte
+account size returns every token account for a mint — but for a freshly
+launched coin, the *largest* of those are its own pool vaults (each pool
+holds a third of supply as single-sided launch liquidity), not real
+holders. Confirmed on a real launched coin: 3 of 4 token accounts were
+owned by the token's own `pool_address` values, the 4th was dust left in
+the platform's own wallet from testing. `getRealHolders` excludes both —
+every one of a token's own pool addresses, and the platform wallet —
+before computing anyone's share.
+
+**Idempotent, resumable by design — not just in theory.** Three new
+tables (`reward_runs` / `reward_run_pools` / `reward_payouts`) track every
+step, and every payout function checks what's already persisted before
+sending anything: the *first* call for a pool computes and inserts
+`'pending'` rows before sending, every call after only resumes rows still
+`'pending'`, never recomputes shares (holder balances can shift between
+attempts) or re-inserts (which would double-pay). This was caught by
+testing, not designed defensively in the abstract: an early version
+re-derived and re-inserted payouts on every call, and a real end-to-end
+test — mint a coin, fund 3 wallets, have them buy in, generate real fee
+volume, harvest, distribute — hit a genuine transient `fetch failed`
+during the buyback step *after* Community and Creator had already
+succeeded. Retrying with the naive version would have re-sent both.
+Rewrote so each of the three payout kinds is checked independently before
+acting, added `harvested_amount != null` (not a status string) as the
+signal for "already harvested," and included `'failed'` runs in what gets
+picked up for retry (safe now that every step underneath is idempotent).
+Reran the exact same scenario: the retry reused the same run and pool
+rows, did not re-harvest, left the two already-`'sent'` Community/Creator
+payouts untouched, and completed only the stuck buyback — confirmed by
+inspecting the DB rows directly, not just by the run finishing without an
+error.
+
+**Split math.** A pool's harvested amount splits into Community/Creator/
+Buyback using the *ratio* between the token's stored
+`community_fee`/`creator_fee`/`buyback_fee` (which the launch form already
+constructs to always sum to the pool's real on-chain trade fee — see the
+"pick a real fee tier, then split 100% of it" entry above), computed with
+scaled-integer arithmetic rather than floats, and Buyback takes the
+remainder (`harvested - community - creator`) rather than its own
+ratio'd slice, so integer-division truncation can't strand a few atomic
+units unaccounted for.
+
+**Deployment.** Runs as its own Railway service (`reward-cron`, cron
+schedule `0 */2 * * *`), not folded into the main API service — a stuck
+reward run can't take the site down, and a site deploy can't interrupt a
+distribution mid-flight. Shares the main service's persistent volume
+(`/data`, same `DB_PATH`) so it reads/writes the same SQLite database;
+Railway's IaC tool (`.railway/railway.ts`) confirmed this is a clean,
+scoped change — `railway config plan` showed exactly two fields changing
+on the new service (`deploy.cronSchedule`, `deploy.startCommand`, and the
+volume attachment) and *zero* changes to the live `perpside` service.

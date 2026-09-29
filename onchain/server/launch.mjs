@@ -12,6 +12,7 @@ import {
   getTokenBalance,
   calculateLaunchFeeLamports,
   redactSecrets,
+  listFeeTierPercents,
   CLUSTER,
   TOTAL_SUPPLY_WHOLE,
   COIN_DECIMALS,
@@ -233,6 +234,10 @@ export function getLaunchConfig() {
     targetFdvUsd: DEFAULT_TARGET_FDV_USD,
     totalSupplyWhole: Number(TOTAL_SUPPLY_WHOLE),
     maxFirstBuySupplyFraction: FIRST_BUY_MAX_SUPPLY_FRACTION,
+    // The reward model's total fee is a choice among these, not a free
+    // slider — anything else can't map onto a real pool (see solana.mjs
+    // pickAmmConfig/listFeeTierPercents).
+    feeTiers: listFeeTierPercents(),
   };
 }
 

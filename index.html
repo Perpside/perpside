@@ -2023,6 +2023,15 @@
 
               <div class="launch-field">
                 <label class="launch-label">Reward model</label>
+
+                <div class="reward-row">
+                  <span class="reward-row__label">Trading fee — total, split below</span>
+                </div>
+                <select class="launch-input" id="launchFeeTier">
+                  <option value="">Loading fee tiers…</option>
+                </select>
+                <p class="launch-first-buy-estimate">Only real Raydium fee tiers can be picked — pool fees can't be set to an arbitrary rate.</p>
+
                 <div class="launch-toggle" id="launchReward">
                   <button type="button" class="launch-toggle__item active" data-reward="community">Community</button>
                   <button type="button" class="launch-toggle__item" data-reward="creator">Creator</button>
@@ -2031,21 +2040,21 @@
 
                 <div class="reward-row" id="communityFeeRow">
                   <span class="reward-row__label">Community reward — paid to every holder</span>
-                  <span class="reward-row__value" id="communityFeeValue">3%</span>
+                  <span class="reward-row__value" id="communityFeeValue">100%</span>
                 </div>
-                <input type="range" class="launch-range" id="communityFeeSlider" min="0.1" max="3" step="0.1" value="3">
+                <input type="range" class="launch-range" id="communityFeeSlider" min="0" max="100" step="1" value="100">
 
                 <div class="reward-row" id="creatorFeeRow" hidden>
                   <span class="reward-row__label">Creator reward — paid to you</span>
-                  <span class="reward-row__value" id="creatorFeeValue">1%</span>
+                  <span class="reward-row__value" id="creatorFeeValue">0%</span>
                 </div>
-                <input type="range" class="launch-range" id="creatorFeeSlider" min="0.1" max="1" step="0.1" value="1" hidden>
+                <input type="range" class="launch-range" id="creatorFeeSlider" min="0" max="100" step="1" value="0" hidden>
 
                 <div class="reward-row" id="buybackFeeRow" hidden>
                   <span class="reward-row__label">Buyback &amp; Burn — buys back and burns supply</span>
-                  <span class="reward-row__value" id="buybackFeeValue">1%</span>
+                  <span class="reward-row__value" id="buybackFeeValue">0%</span>
                 </div>
-                <input type="range" class="launch-range" id="buybackFeeSlider" min="0.1" max="1" step="0.1" value="1" hidden>
+                <input type="range" class="launch-range" id="buybackFeeSlider" min="0" max="100" step="1" value="0" hidden>
               </div>
 
               <div class="launch-field">
@@ -2121,14 +2130,15 @@
 
             <div class="how-section" data-section="fees" hidden>
               <h2>Reward Model &amp; Fees</h2>
-              <p>Every coin's total trading fee is capped at <b>3%</b>, split across up to three destinations you configure at launch. At least one must be enabled:</p>
+              <p>Launching sets the pool's actual on&#8209;chain trading fee, then splits 100% of it across up to three destinations. Both steps are configured at launch:</p>
               <ul>
-                <li><b>Community</b> &mdash; paid directly to every holder's wallet in proportion to their balance. Adjustable anywhere up to the full 3% when it's the only reward enabled, or shared down to make room for the others.</li>
-                <li><b>Creator</b> &mdash; paid to the coin's creator. Capped at 1%, regardless of what else is enabled.</li>
-                <li><b>Buyback &amp; Burn</b> &mdash; used to buy the coin back from the market and burn it, permanently reducing supply. Capped at 1%.</li>
+                <li><b>Trading fee</b> &mdash; picked from Raydium's own published fee tiers, not a free&#8209;form number. Raydium only lets pools charge one of its pre&#8209;approved rates (creating a custom rate isn't possible &mdash; that's admin&#8209;only on Raydium's program), so the launch form offers exactly the tiers that exist on whichever network the coin launches on.</li>
+                <li><b>Community</b> &mdash; the share of that fee paid directly to every holder's wallet, in proportion to their balance.</li>
+                <li><b>Creator</b> &mdash; the share paid to the coin's creator.</li>
+                <li><b>Buyback &amp; Burn</b> &mdash; the share used to buy the coin back from the market and burn it, permanently reducing supply.</li>
               </ul>
-              <p>With all three enabled, each is capped at 1% &mdash; still summing to the same 3% ceiling. There's no separate "fee tier" to pick; the model is whatever combination of the three the creator configures, and it's recorded against the coin from the moment it launches.</p>
-              <p><b>This piece is still rolling out.</b> The split a creator configures is saved and shown for every coin, but automatic on&#8209;chain collection and payout isn't live yet &mdash; Perpside is beta software, and this is one of the parts still being built. Don't assume a coin is actively paying out rewards; treat the configured split as the coin's intended model until collection is confirmed live.</p>
+              <p>At least one of Community / Creator / Buyback &amp; Burn must be enabled, and whichever are enabled always split <b>100% of the chosen trading fee</b> between them &mdash; e.g. a 1% fee split 33% / 33% / 34% pays 0.33% to holders, 0.33% to the creator, and 0.34% to buyback &amp; burn, out of every trade. Enabling or disabling a destination re&#8209;splits evenly across whatever's left on; each slider can then be adjusted from there.</p>
+              <p><b>This piece is still rolling out.</b> The trading fee itself is real and live &mdash; it's the actual rate the pool charges on every swap. The split between Community / Creator / Buyback &amp; Burn is saved and shown for every coin, but automatic collection and payout to those three destinations isn't live yet &mdash; Perpside is beta software, and this is one of the parts still being built. Don't assume a coin is actively paying out rewards; treat the configured split as the coin's intended model until collection is confirmed live.</p>
             </div>
 
             <div class="how-section" data-section="trading" hidden>
@@ -2666,6 +2676,7 @@
 
       var assetGrid = document.getElementById('launchAssetGrid');
       var rewardGroup = document.getElementById('launchReward');
+      var feeTierSelect = document.getElementById('launchFeeTier');
       var communityFeeRow = document.getElementById('communityFeeRow');
       var communityFeeSlider = document.getElementById('communityFeeSlider');
       var communityFeeValue = document.getElementById('communityFeeValue');
@@ -2690,12 +2701,78 @@
       var selectedAssets = [];
       var MAX_ASSETS = 3;
       var selectedImage = '';
-      var communityEnabled = true;
-      var creatorEnabled = false;
-      var buybackEnabled = false;
-      var communityFee = 3;
-      var creatorFee = 1;
-      var buybackFee = 1;
+
+      // The pool's actual on-chain trading fee can only be one of Raydium's
+      // published tiers (see /api/launch-config feeTiers — custom rates
+      // aren't possible, the program is admin-gated for that). So the
+      // reward model is now: pick a real total fee tier, then split 100% of
+      // it across whichever of Community/Creator/Buyback are enabled.
+      // `shares` are percentages of that total (always summing to 100
+      // across enabled keys), not percentages of trade volume directly.
+      var totalFeePercent = 0; // set once /api/launch-config resolves
+      var defaultFeeTierPercent = 0;
+      var enabled = { community: true, creator: false, buyback: false };
+      var shares = { community: 100, creator: 0, buyback: 0 };
+
+      function enabledRewardKeys() {
+        return ['community', 'creator', 'buyback'].filter(function (k) { return enabled[k]; });
+      }
+
+      // Split the remaining 100% among the untouched keys, preserving their
+      // relative proportions (or evenly, if they're all still at zero) —
+      // the standard behavior for a "these must sum to 100" slider group.
+      function setShare(changedKey, newValue) {
+        var keys = enabledRewardKeys();
+        if (keys.indexOf(changedKey) === -1) return;
+        var others = keys.filter(function (k) { return k !== changedKey; });
+        if (!others.length) { shares[changedKey] = 100; return; }
+        newValue = Math.max(0, Math.min(100, newValue));
+        var remaining = 100 - newValue;
+        var othersSum = others.reduce(function (s, k) { return s + shares[k]; }, 0);
+        shares[changedKey] = newValue;
+        others.forEach(function (k) {
+          shares[k] = othersSum > 0 ? (shares[k] / othersSum) * remaining : remaining / others.length;
+        });
+      }
+
+      // Whenever a reward destination is toggled on/off, the simplest
+      // predictable outcome is an even split across whatever's enabled now.
+      function resetSharesEvenly() {
+        var keys = enabledRewardKeys();
+        var even = 100 / keys.length;
+        shares = { community: 0, creator: 0, buyback: 0 };
+        keys.forEach(function (k) { shares[k] = even; });
+      }
+
+      function absoluteFee(key) {
+        return enabled[key] ? Math.round((shares[key] / 100) * totalFeePercent * 1000) / 1000 : 0;
+      }
+
+      function formatFeeTierLabel(pct) {
+        var s = Math.round(pct * 10000) / 10000;
+        return s + '%';
+      }
+
+      function populateFeeTiers(tiers) {
+        if (!feeTierSelect || !tiers || !tiers.length) return;
+        feeTierSelect.innerHTML = '';
+        tiers.forEach(function (pct) {
+          var opt = document.createElement('option');
+          opt.value = pct;
+          opt.textContent = formatFeeTierLabel(pct);
+          feeTierSelect.appendChild(opt);
+        });
+        // Default to whichever tier is closest to 1% — a reasonable
+        // starting point on any cluster's tier list.
+        var closest = tiers.reduce(function (best, t) {
+          return Math.abs(t - 1) < Math.abs(best - 1) ? t : best;
+        }, tiers[0]);
+        defaultFeeTierPercent = closest;
+        totalFeePercent = closest;
+        feeTierSelect.value = String(closest);
+        renderRewardRows();
+        updatePreview();
+      }
 
       if (imageInput) {
         imageInput.addEventListener('change', function () {
@@ -2730,9 +2807,9 @@
           cap: 0,
           position: selectedAssets.map(function (a) { return { asset: a, icon: assetIconMap[a] }; }),
           rewardModel: {
-            community: communityEnabled ? communityFee : 0,
-            creator: creatorEnabled ? creatorFee : 0,
-            buyback: buybackEnabled ? buybackFee : 0
+            community: absoluteFee('community'),
+            creator: absoluteFee('creator'),
+            buyback: absoluteFee('buyback')
           },
           links: {
             x: x || undefined,
@@ -2982,62 +3059,55 @@
         });
       }
 
+      // Slider labels show both the share of the chosen fee and what that
+      // works out to in absolute % of trade volume, since the latter is
+      // what actually gets recorded and (eventually) paid out.
+      function shareLabel(key) {
+        var share = Math.round(shares[key]);
+        return share + '% of fee (' + absoluteFee(key) + '% of volume)';
+      }
+
       function renderRewardRows() {
-        var othersCount = (creatorEnabled ? 1 : 0) + (buybackEnabled ? 1 : 0);
-
-        if (communityEnabled) {
-          var communityMax = othersCount > 0 ? Math.max(3 - othersCount, 0.1) : 3;
-          if (communityFeeRow) communityFeeRow.hidden = false;
-          if (communityFeeSlider) {
-            communityFeeSlider.hidden = false;
-            communityFeeSlider.max = communityMax;
-            communityFee = Math.min(communityFee, communityMax);
-            communityFeeSlider.value = communityFee;
-          }
-        } else {
-          if (communityFeeRow) communityFeeRow.hidden = true;
-          if (communityFeeSlider) communityFeeSlider.hidden = true;
+        if (communityFeeRow) communityFeeRow.hidden = !enabled.community;
+        if (communityFeeSlider) communityFeeSlider.hidden = !enabled.community;
+        if (enabled.community) {
+          if (communityFeeSlider) communityFeeSlider.value = Math.round(shares.community);
+          if (communityFeeValue) communityFeeValue.textContent = shareLabel('community');
         }
-        if (communityFeeValue) communityFeeValue.textContent = communityFee + '%';
 
-        if (creatorEnabled) {
-          if (creatorFeeRow) creatorFeeRow.hidden = false;
-          if (creatorFeeSlider) {
-            creatorFeeSlider.hidden = false;
-            creatorFeeSlider.value = creatorFee;
-          }
-        } else {
-          if (creatorFeeRow) creatorFeeRow.hidden = true;
-          if (creatorFeeSlider) creatorFeeSlider.hidden = true;
+        if (creatorFeeRow) creatorFeeRow.hidden = !enabled.creator;
+        if (creatorFeeSlider) creatorFeeSlider.hidden = !enabled.creator;
+        if (enabled.creator) {
+          if (creatorFeeSlider) creatorFeeSlider.value = Math.round(shares.creator);
+          if (creatorFeeValue) creatorFeeValue.textContent = shareLabel('creator');
         }
-        if (creatorFeeValue) creatorFeeValue.textContent = creatorFee + '%';
 
-        if (buybackEnabled) {
-          if (buybackFeeRow) buybackFeeRow.hidden = false;
-          if (buybackFeeSlider) {
-            buybackFeeSlider.hidden = false;
-            buybackFeeSlider.value = buybackFee;
-          }
-        } else {
-          if (buybackFeeRow) buybackFeeRow.hidden = true;
-          if (buybackFeeSlider) buybackFeeSlider.hidden = true;
+        if (buybackFeeRow) buybackFeeRow.hidden = !enabled.buyback;
+        if (buybackFeeSlider) buybackFeeSlider.hidden = !enabled.buyback;
+        if (enabled.buyback) {
+          if (buybackFeeSlider) buybackFeeSlider.value = Math.round(shares.buyback);
+          if (buybackFeeValue) buybackFeeValue.textContent = shareLabel('buyback');
         }
-        if (buybackFeeValue) buybackFeeValue.textContent = buybackFee + '%';
+      }
+
+      if (feeTierSelect) {
+        feeTierSelect.addEventListener('change', function () {
+          totalFeePercent = parseFloat(feeTierSelect.value) || 0;
+          renderRewardRows();
+          updatePreview();
+        });
       }
 
       if (rewardGroup) {
         Array.prototype.slice.call(rewardGroup.querySelectorAll('.launch-toggle__item')).forEach(function (btn) {
           btn.addEventListener('click', function () {
             var kind = btn.getAttribute('data-reward');
-            var enabledCount = (communityEnabled ? 1 : 0) + (creatorEnabled ? 1 : 0) + (buybackEnabled ? 1 : 0);
-            var currentlyOn = kind === 'community' ? communityEnabled : (kind === 'creator' ? creatorEnabled : buybackEnabled);
-            if (currentlyOn && enabledCount === 1) return;
+            var keys = enabledRewardKeys();
+            if (enabled[kind] && keys.length === 1) return; // at least one destination stays on
 
-            if (kind === 'community') communityEnabled = !communityEnabled;
-            else if (kind === 'creator') creatorEnabled = !creatorEnabled;
-            else buybackEnabled = !buybackEnabled;
-
-            btn.classList.toggle('active', kind === 'community' ? communityEnabled : (kind === 'creator' ? creatorEnabled : buybackEnabled));
+            enabled[kind] = !enabled[kind];
+            btn.classList.toggle('active', enabled[kind]);
+            resetSharesEvenly();
             renderRewardRows();
             updatePreview();
           });
@@ -3046,22 +3116,25 @@
 
       if (communityFeeSlider) {
         communityFeeSlider.addEventListener('input', function () {
-          communityFee = parseFloat(communityFeeSlider.value);
-          if (communityFeeValue) communityFeeValue.textContent = communityFee + '%';
+          setShare('community', parseFloat(communityFeeSlider.value));
+          renderRewardRows();
+          updatePreview();
         });
       }
 
       if (creatorFeeSlider) {
         creatorFeeSlider.addEventListener('input', function () {
-          creatorFee = parseFloat(creatorFeeSlider.value);
-          if (creatorFeeValue) creatorFeeValue.textContent = creatorFee + '%';
+          setShare('creator', parseFloat(creatorFeeSlider.value));
+          renderRewardRows();
+          updatePreview();
         });
       }
 
       if (buybackFeeSlider) {
         buybackFeeSlider.addEventListener('input', function () {
-          buybackFee = parseFloat(buybackFeeSlider.value);
-          if (buybackFeeValue) buybackFeeValue.textContent = buybackFee + '%';
+          setShare('buyback', parseFloat(buybackFeeSlider.value));
+          renderRewardRows();
+          updatePreview();
         });
       }
 
@@ -3177,12 +3250,12 @@
         form.reset();
         selectedAssets = [];
         selectedImage = '';
-        communityEnabled = true;
-        creatorEnabled = false;
-        buybackEnabled = false;
-        communityFee = 3;
-        creatorFee = 1;
-        buybackFee = 1;
+        enabled = { community: true, creator: false, buyback: false };
+        resetSharesEvenly();
+        if (defaultFeeTierPercent) {
+          totalFeePercent = defaultFeeTierPercent;
+          if (feeTierSelect) feeTierSelect.value = String(defaultFeeTierPercent);
+        }
         if (imagePreview) {
           imagePreview.hidden = true;
           imagePreview.src = '';
@@ -3363,9 +3436,9 @@
               xLink: x || undefined,
               telegramLink: telegram || undefined,
               websiteLink: website || undefined,
-              communityFee: communityEnabled ? communityFee : 0,
-              creatorFee: creatorEnabled ? creatorFee : 0,
-              buybackFee: buybackEnabled ? buybackFee : 0
+              communityFee: absoluteFee('community'),
+              creatorFee: absoluteFee('creator'),
+              buybackFee: absoluteFee('buyback')
             });
           })
           .then(function (data) {
@@ -3396,6 +3469,9 @@
       updateAssetGridState();
       renderRewardRows();
       updatePreview();
+      fetchLaunchConfig().then(function (config) {
+        populateFeeTiers(config.feeTiers);
+      }).catch(function () { /* select stays on its "Loading…" placeholder */ });
     })();
 
     (function () {

@@ -860,3 +860,47 @@ asset, unaffected by this change). Devnet can't test the mid-range tiers
 this feature is actually for — its own tier list tops out where mainnet's
 starts getting interesting — so higher tiers remain unverified until a
 real mainnet launch exercises them.
+
+## Launch form: pick a real fee tier, then split 100% of it (2026-09-29)
+
+Previously the three reward sliders (Community/Creator/Buyback) were each
+an independent absolute percentage with their own hardcoded caps (3% / 1%
+/ 1%) — a holdover from before pool fees were tied to real Raydium tiers
+at all. That let a creator configure a combined total (e.g. 5%) nowhere
+near any tier that actually exists, silently rounded away by
+`pickAmmConfig` server-side with no visibility into what was actually
+picked.
+
+Replaced with a two-step model that matches the constraint directly
+instead of hiding it:
+
+1. **Trading fee** — a `<select>` populated from a new
+   `feeTiers` array on `GET /api/launch-config` (`listFeeTierPercents()`
+   in `solana.mjs`, sourced from the same per-cluster tier lists
+   `pickAmmConfig` already used). Only real tiers are selectable — nothing
+   to round on the way in anymore, though `pickAmmConfig`'s rounding stays
+   in place server-side as a defense-in-depth fallback, not the primary
+   mechanism.
+2. **Community / Creator / Buyback & Burn** — sliders now represent each
+   enabled destination's *share of that fee* (0–100), always kept summing
+   to 100 across whichever destinations are on. Moving one slider
+   redistributes the remainder proportionally across the others; toggling
+   a destination on/off re-splits evenly across whatever's left enabled.
+   `communityFee`/`creatorFee`/`buybackFee` are still sent to `/api/launch`
+   as absolute percentages (`share/100 * totalFeePercent`) — the DB schema
+   and backend didn't need to change, only how the frontend arrives at
+   those numbers.
+
+Matches the example given when this was requested: a 1% fee split 33% /
+33% / 34% now means 0.33% to holders, 0.33% to the creator, and 0.34% to
+buyback & burn, out of every trade — not three independently-capped
+numbers that happened to add up to something.
+
+Verified in a real browser (Playwright against the local dev server, not
+just unit logic): fee tier `<select>` populates from the live
+`/api/launch-config` response, defaults to whichever tier is closest to
+1%, enabling all three destinations splits them 33.3/33.3/33.3, dragging
+sliders to 33/34 lands exactly on a 100 sum, switching the fee tier
+updates every "% of volume" label live, and disabling a destination
+correctly re-splits the remaining 100% across what's left on — screenshot
+confirmed the layout renders cleanly with no console errors.

@@ -120,6 +120,16 @@ export function pickAmmConfig(totalFeePercent) {
   return toAmmConfig(closest);
 }
 
+// The frontend can't offer a fee choice that pickAmmConfig can't actually
+// honor — so instead of a free-form slider up to some cap, it needs the
+// exact list of tiers Raydium publishes on this cluster to build a picker
+// from. Sorted ascending, deduplicated by rate (each configured tier here
+// has a distinct tradeFeeRate).
+export function listFeeTierPercents() {
+  const configs = CLUSTER === 'mainnet-beta' ? MAINNET_AMM_CONFIGS : DEVNET_AMM_CONFIGS;
+  return [...new Set(configs.map((c) => c.tradeFeeRate / 10000))].sort((a, b) => a - b);
+}
+
 export const COIN_DECIMALS = 6;
 export const TOTAL_SUPPLY_WHOLE = 1_000_000_000n;
 

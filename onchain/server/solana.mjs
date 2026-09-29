@@ -14,6 +14,7 @@ import {
 import {
   PROGRAM_ID as METADATA_PROGRAM_ID,
   createCreateMetadataAccountV3Instruction,
+  createUpdateMetadataAccountV2Instruction,
 } from '@metaplex-foundation/mpl-token-metadata';
 import {
   Raydium,
@@ -214,8 +215,10 @@ export function broadcastFeeTx(signedTxBase64) {
 // indefinitely:
 //   - freeze authority: never granted in the first place (null from
 //     createInitializeMint2Instruction below) — nothing to revoke.
-//   - metadata update authority: never granted either — isMutable: false
-//     at creation means there's no update authority to later misuse.
+//   - metadata update authority: briefly held (has to be, to create the
+//     metadata account at all) and cleared to null in the same
+//     transaction, alongside locking isMutable false — see the comment
+//     right above that instruction for why both happen in one call.
 //   - mint authority: *is* needed up front (to mint the initial supply in
 //     this same transaction) and revoked at the end of it — supply is
 //     fixed at TOTAL_SUPPLY_WHOLE forever after this transaction confirms.
@@ -247,15 +250,35 @@ export async function mintCoinToken({ name, symbol, metadataUri }) {
     createInitializeMint2Instruction(mint, COIN_DECIMALS, payer.publicKey, null, TOKEN_PROGRAM_ID),
     createAssociatedTokenAccountInstruction(payer.publicKey, ata, payer.publicKey, mint, TOKEN_PROGRAM_ID),
     createMintToInstruction(mint, ata, payer.publicKey, totalAtomic, [], TOKEN_PROGRAM_ID),
+    // Created mutable, then immediately locked by the update instruction
+    // right below — has to be this order. The on-chain program rejects any
+    // update once is_mutable is false, including the update that would
+    // clear updateAuthority itself, so nulling the authority and locking
+    // immutability must happen together, in the one update call made while
+    // it's still mutable.
     createCreateMetadataAccountV3Instruction(
       { metadata: metadataPda, mint, mintAuthority: payer.publicKey, payer: payer.publicKey, updateAuthority: payer.publicKey },
       {
         createMetadataAccountArgsV3: {
           data: { name, symbol, uri: metadataUri, sellerFeeBasisPoints: 0, creators: null, collection: null, uses: null },
-          isMutable: false,
+          isMutable: true,
           collectionDetails: null,
         },
       }
+    ),
+    // On-chain, a metadata account's updateAuthority is a plain 32-byte
+    // pubkey field, not an optional one — there's no "empty" value for it.
+    // Passing `null` here (tried first) doesn't clear it; for this
+    // instruction's args, None on a field means "leave unchanged", so
+    // `updateAuthority: null` silently kept the platform's key in place
+    // (confirmed by decoding a real launch's metadata after — isMutable
+    // did flip to false, updateAuthority didn't move). The actual
+    // convention for "no one controls this" is reassigning it to the
+    // System Program's address, which is a valid pubkey that can never
+    // sign a transaction as an authority.
+    createUpdateMetadataAccountV2Instruction(
+      { metadata: metadataPda, updateAuthority: payer.publicKey },
+      { updateMetadataAccountArgsV2: { data: null, updateAuthority: SystemProgram.programId, primarySaleHappened: null, isMutable: false } }
     ),
     createSetAuthorityInstruction(mint, payer.publicKey, AuthorityType.MintTokens, null, [], TOKEN_PROGRAM_ID)
   );

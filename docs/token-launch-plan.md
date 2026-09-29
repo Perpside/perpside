@@ -787,3 +787,37 @@ new pool-creation call, decoded the resulting pool account directly, and
 confirmed `feeOn = 2` (Token1Only) with the backing asset as mintB —
 matches intent exactly, cross-checked against the program's own source
 rather than assumed from the SDK type alone.
+
+## Metadata update authority actually cleared, not just inert (2026-09-29)
+
+`isMutable: false` (already in place) already meant metadata could never be
+changed regardless of who `updateAuthority` pointed at — but the field
+itself still showed the platform's own wallet address on-chain, which
+looks wrong to anyone (or any tool) checking that field specifically
+rather than `isMutable`. Closed the gap.
+
+**First attempt failed, caught by testing rather than trusting the docs.**
+Tried `createUpdateMetadataAccountV2Instruction` with `updateAuthority:
+null`, expecting Borsh's `COption::None` to clear the field. It didn't —
+verified by decoding a real launch's metadata afterward: `isMutable`
+correctly flipped to `false`, but `updateAuthority` still showed the
+platform's key. Turns out `None` on this field means *"leave unchanged"*,
+not *"clear it"* — the field is a plain 32-byte pubkey on-chain, not an
+optional type, so there's no "empty" value to set it to via this
+mechanism. (A related, separate bug in Metaplex's newer `updateV1`
+instruction — reported on GitHub — made this worth verifying rather than
+assuming either way.)
+
+**Fix:** reassign `updateAuthority` to `SystemProgram.programId`
+(`11111111111111111111111111111111`) instead — the standard convention
+for "no one controls this," since it's a valid pubkey that can never
+actually sign a transaction as an authority (it's a program, not a
+wallet). Both this reassignment and `isMutable: false` have to happen in
+the *same* update call, made while the metadata is still momentarily
+mutable right after creation — the on-chain program rejects any update
+once `isMutable` is already false, including the update that would clear
+the authority.
+
+Verified for real on devnet: launched a coin, decoded its metadata, and
+confirmed `updateAuthority` reads back as `11111111111111111111111111111111`
+with `isMutable: false` — this time actually cleared, not just inert.

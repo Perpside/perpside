@@ -1,4 +1,13 @@
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  TransactionMessage,
+  VersionedTransaction,
+  sendAndConfirmTransaction,
+} from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
   MINT_SIZE,
@@ -7,6 +16,7 @@ import {
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
   createSetAuthorityInstruction,
+  createBurnInstruction,
   AuthorityType,
   getAssociatedTokenAddress,
   getAccount,
@@ -263,6 +273,8 @@ export async function mintCoinToken({ name, symbol, metadataUri }) {
 // coinShareWhole. Platform wallet pays all rent and provides all liquidity.
 export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coinShareWhole }) {
   const raydium = await getRaydium();
+  const connection = getConnection();
+  const payer = getPlatformWallet();
   const coinIsMintA = isCoinMintA(coinMint, asset.mint);
 
   const coinShareAtomic = toAtomicUnits(coinShareWhole, COIN_DECIMALS);
@@ -295,7 +307,16 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
   const rawPoolId = poolKeys.id ?? poolKeys.poolId;
   const poolId = typeof rawPoolId === 'string' ? rawPoolId : rawPoolId.toBase58();
 
-  const { execute: executeOpen, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
+  // Built, not executed, here — a burn instruction gets appended to this
+  // same transaction below before it's ever sent, so the position NFT is
+  // destroyed in the same atomic transaction that mints it. Raydium's
+  // decreaseLiquidity/closePosition both require presenting a token account
+  // holding that exact NFT (see decreaseLiquidityV2Instruction's nftAccount
+  // param) — once total supply is 0, that requirement can never be
+  // satisfied again, by anyone, including the platform. This is what makes
+  // "the platform can't withdraw a coin's starting liquidity" a provable
+  // fact instead of a promise — see docs/token-launch-plan.md.
+  const { transaction: openTx, signers: openSigners, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
     poolInfo: mockPoolInfo,
     poolKeys,
     ownerInfo: { useSOLBalance: true },
@@ -313,16 +334,37 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     otherAmountMax: new BN(1000),
     txVersion: TxVersion.V0,
   });
-  const openResult = await executeOpen({ sendAndConfirm: true });
+
+  const positionNftMint = openExtInfo.nftMint;
+  const nftAta = await getAssociatedTokenAddress(positionNftMint, payer.publicKey);
+  const burnIx = createBurnInstruction(nftAta, positionNftMint, payer.publicKey, 1, [], TOKEN_PROGRAM_ID);
+
+  // Read the lookup table keys the compiled message actually references,
+  // straight off the message itself — buildProps.lookupTableAddress isn't
+  // reliably populated, but addressTableLookups always is when a table was
+  // used, since decompiling needs it either way.
+  let lookupTableAccounts = [];
+  const tableKeys = openTx.message.addressTableLookups?.map((l) => l.accountKey) ?? [];
+  if (tableKeys.length) {
+    const fetched = await Promise.all(tableKeys.map((key) => connection.getAddressLookupTable(key)));
+    lookupTableAccounts = fetched.map((r) => r.value).filter(Boolean);
+  }
+
+  const decompiled = TransactionMessage.decompile(openTx.message, { addressLookupTableAccounts: lookupTableAccounts });
+  decompiled.instructions.push(burnIx);
+  const combinedTx = new VersionedTransaction(decompiled.compileToV0Message(lookupTableAccounts));
+  combinedTx.sign([payer, ...openSigners]);
+
+  const openTxId = await broadcastSignedTx(Buffer.from(combinedTx.serialize()).toString('base64'), 'open position + burn NFT');
 
   return {
     poolId,
-    positionNftMint: openExtInfo.nftMint.toBase58(),
+    positionNftMint: positionNftMint.toBase58(),
     tickLower,
     tickUpper,
     startPrice: startPrice.toString(),
     createTx: createResult?.txId ?? String(createResult),
-    openTx: openResult?.txId ?? String(openResult),
+    openTx: openTxId,
   };
 }
 

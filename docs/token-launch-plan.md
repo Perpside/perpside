@@ -659,3 +659,49 @@ and a reward-model config set, confirmed it round-tripped through
 function from `index.html` (not a reimplementation — extracted and executed
 verbatim) against that real response and confirmed it produces exactly the
 shape `renderCard` expects.
+
+## Starting liquidity is now provably locked (2026-09-29)
+
+Closes the centralization gap the "How It Works" rewrite had just disclosed
+(platform holds each position, no on-chain lock): the position NFT is now
+burned in the same transaction that opens the position, in
+`createPoolAndPosition` (`solana.mjs`).
+
+**Why this works.** Raydium CLMM's `decreaseLiquidity`/`closePosition`
+require presenting a token account that holds the position's NFT
+(`decreaseLiquidityV2Instruction`'s `nftAccount` param — confirmed by
+reading the instruction signature, not assumed) — the on-chain program
+checks that account's balance, not some separately-stored owner field.
+Burn the NFT to zero total supply and that requirement becomes permanently
+unsatisfiable, by anyone, forever. This is the same pattern other
+CLMM-based launch platforms use to prove they can't rug a coin's starting
+liquidity.
+
+**How it's built.** `openPositionFromBase` is no longer called through its
+own `execute()` — its unsigned `transaction`/`signers` are taken directly,
+a `createBurnInstruction` for the position NFT is appended, and the
+combined transaction is signed and sent as one. The tricky part was
+address lookup tables: `openPositionFromBase` compiles its `VersionedTransaction`
+against one (confirmed by hitting `Failed to find address lookup table
+account` on the first attempt), and `buildProps.lookupTableAddress` — the
+field that looked like the right place to read which table — wasn't
+reliably populated. Reading the table keys directly off the compiled
+message's own `addressTableLookups` instead is what actually worked,
+since decompiling needs that information regardless of whether the SDK
+surfaces it anywhere else.
+
+Verified for real on devnet: ran a full launch, confirmed via
+`getParsedAccountInfo` that the position NFT's supply is `0` and the
+platform's own NFT token account is empty — both from the single `openTx`
+signature the launch returned, not a follow-up transaction. Then, to make
+sure burning the NFT doesn't also break the pool itself (it shouldn't —
+NFT ownership only gates LP-management instructions, not swaps),
+ran a real First Buy hop 2 swap against that same pool and confirmed it
+executed normally: creator's xSOL spent, COIN received. Trading is
+unaffected; only decreaseLiquidity/closePosition are now permanently
+impossible.
+
+Updated "How It Works" to match — the Overview section states the lock as
+fact rather than the Risk section disclosing its absence, and the
+Risk & Disclaimers paragraph now separates what's still centralized (who
+creates a coin) from what's provably locked (what happens to it after).

@@ -14,6 +14,7 @@
   "dependencies": {
     "@irys/upload": "^0.0.15",
     "@irys/upload-solana": "^0.1.8",
+    "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
     "@raydium-io/raydium-sdk-v2": "^0.2.73-alpha",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",

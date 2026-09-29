@@ -6,9 +6,15 @@ import {
   createInitializeMint2Instruction,
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
+  createSetAuthorityInstruction,
+  AuthorityType,
   getAssociatedTokenAddress,
   getAccount,
 } from '@solana/spl-token';
+import {
+  PROGRAM_ID as METADATA_PROGRAM_ID,
+  createCreateMetadataAccountV3Instruction,
+} from '@metaplex-foundation/mpl-token-metadata';
 import {
   Raydium,
   DEVNET_PROGRAM_ID,
@@ -195,8 +201,22 @@ export function broadcastFeeTx(signedTxBase64) {
 }
 
 // Mints the coin, platform wallet pays rent + holds the full initial supply
-// until it's distributed into pools by createPoolAndPosition.
-export async function mintCoinToken() {
+// until it's distributed into pools by createPoolAndPosition. Also creates
+// its on-chain Metaplex metadata (name/symbol/uri — without this, wallets
+// and explorers show the coin as an unnamed token) and immediately locks
+// down both authorities a launch platform shouldn't be trusted to hold
+// indefinitely:
+//   - freeze authority: never granted in the first place (null from
+//     createInitializeMint2Instruction below) — nothing to revoke.
+//   - metadata update authority: never granted either — isMutable: false
+//     at creation means there's no update authority to later misuse.
+//   - mint authority: *is* needed up front (to mint the initial supply in
+//     this same transaction) and revoked at the end of it — supply is
+//     fixed at TOTAL_SUPPLY_WHOLE forever after this transaction confirms.
+// All of it — create, initialize, ATA, mint, metadata, revoke — happens as
+// one transaction, so there's no window where a partial failure could
+// leave the mint authority live with only some of these done.
+export async function mintCoinToken({ name, symbol, metadataUri }) {
   const connection = getConnection();
   const payer = getPlatformWallet();
   const mintKeypair = Keypair.generate();
@@ -204,11 +224,11 @@ export async function mintCoinToken() {
   const ata = await getAssociatedTokenAddress(mint, payer.publicKey);
   const totalAtomic = TOTAL_SUPPLY_WHOLE * 10n ** BigInt(COIN_DECIMALS);
 
-  // The individual @solana/spl-token helpers (createMint,
-  // getOrCreateAssociatedTokenAccount, mintTo) each send their own
-  // transaction — fine on their own, but three round trips for four small
-  // instructions that fit in one transaction's size limit with room to
-  // spare. Composed by hand instead: one transaction, one confirmation.
+  const [metadataPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    METADATA_PROGRAM_ID
+  );
+
   const rentLamports = await getMinimumBalanceForRentExemptMint(connection);
   const tx = new Transaction().add(
     SystemProgram.createAccount({
@@ -220,11 +240,22 @@ export async function mintCoinToken() {
     }),
     createInitializeMint2Instruction(mint, COIN_DECIMALS, payer.publicKey, null, TOKEN_PROGRAM_ID),
     createAssociatedTokenAccountInstruction(payer.publicKey, ata, payer.publicKey, mint, TOKEN_PROGRAM_ID),
-    createMintToInstruction(mint, ata, payer.publicKey, totalAtomic, [], TOKEN_PROGRAM_ID)
+    createMintToInstruction(mint, ata, payer.publicKey, totalAtomic, [], TOKEN_PROGRAM_ID),
+    createCreateMetadataAccountV3Instruction(
+      { metadata: metadataPda, mint, mintAuthority: payer.publicKey, payer: payer.publicKey, updateAuthority: payer.publicKey },
+      {
+        createMetadataAccountArgsV3: {
+          data: { name, symbol, uri: metadataUri, sellerFeeBasisPoints: 0, creators: null, collection: null, uses: null },
+          isMutable: false,
+          collectionDetails: null,
+        },
+      }
+    ),
+    createSetAuthorityInstruction(mint, payer.publicKey, AuthorityType.MintTokens, null, [], TOKEN_PROGRAM_ID)
   );
   await sendAndConfirmTransaction(connection, tx, [payer, mintKeypair]);
 
-  return { mint: mint.toBase58(), ata: ata.toBase58() };
+  return { mint: mint.toBase58(), ata: ata.toBase58(), metadata: metadataPda.toBase58() };
 }
 
 // Creates one CLMM pool for `coinMint` paired with `asset`, calibrated to

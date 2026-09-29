@@ -148,19 +148,21 @@ one executing `openPositionFromBase`
 
 ## Where logo + metadata live
 
-Standard Solana approach, no custom infra to run ourselves:
+Standard Solana approach, no custom infra to run ourselves — fully built
+now (was aspirational when first written; see "Metaplex metadata + revoked
+authorities" further down for when steps 3-4 actually landed):
 
-1. Creator's uploaded image (currently a `data:` URL in the browser) gets
-   uploaded server-side to **Arweave** via Irys (formerly Bundlr) at launch
-   time. Irys is the common path other Solana launch tools use — pay a small
-   amount once, permanent storage, get back a stable `https://arweave.net/<id>`
-   URL.
+1. Creator's uploaded image (a `data:` URL in the browser) gets uploaded
+   server-side to **Arweave** via Irys at launch time — permanent storage,
+   stable URL (`upload.mjs`).
 2. Build the standard Metaplex token-metadata JSON
-   (`{ name, symbol, description, image, ... }`), upload that JSON the same
-   way, get a second URI.
-3. Mint the token with Metaplex Token Metadata pointing `uri` at that JSON.
-   Wallets/explorers/Jupiter/Raydium all resolve the logo through this, same
-   as any other Solana token — nothing custom to maintain.
+   (`{ name, symbol, description, image }`), upload that JSON the same way,
+   get a second URI. Both uploads now happen *before* minting (see below) —
+   the mint transaction needs a real URI to point its on-chain metadata at.
+3. Mint the token with Metaplex Token Metadata pointing `uri` at that JSON,
+   `isMutable: false`. Wallets/explorers/Jupiter/Raydium all resolve the
+   logo through this, same as any other Solana token — nothing custom to
+   maintain.
 4. Our own DB still stores the resolved URLs directly (see below) so the
    Explore grid doesn't have to re-resolve on-chain metadata on every page
    load.
@@ -559,3 +561,57 @@ frontend's live estimate can show the same "exceeds the cap" message
 without waiting for a round trip, using the same formula — not
 authoritative (the server checks are), just avoids surprising the creator
 only after they've tried to sign something.
+
+## Metaplex metadata + revoked authorities (2026-09-29)
+
+Prompted by a request to revoke mint/freeze/metadata-update authorities —
+turned up that on-chain Metaplex metadata (name/symbol/logo) had never
+actually been implemented despite being described in "Where logo + metadata
+live" above. Coins minted before this had no on-chain metadata at all —
+wallets/Solscan would have shown them as unnamed tokens. Fixed both at
+once, since setting up the mint correctly and attaching real metadata are
+the same transaction now.
+
+**Where each authority stands:**
+- **Freeze authority** — never granted (`createInitializeMint2Instruction`
+  already passed `null`). Nothing to revoke; was already correct.
+- **Metadata update authority** — never meaningfully granted either.
+  `mintCoinToken` creates the Metaplex metadata account with
+  `isMutable: false` at creation, so there's no window where it could be
+  changed — a create-then-immediately-lock two-step would have the same
+  end state but one more thing that could go wrong between the steps.
+- **Mint authority** — *is* needed, to mint the fixed initial supply in
+  this same transaction, and gets revoked (`createSetAuthorityInstruction`,
+  `AuthorityType.MintTokens`, new authority `null`) as the last instruction
+  in it. Supply is fixed at `TOTAL_SUPPLY_WHOLE` forever the moment this
+  transaction confirms — the platform cannot mint more later even if it
+  wanted to.
+
+All six instructions — create account, initialize mint, create ATA, mint
+the supply, create metadata, revoke mint authority — are one transaction
+(`mintCoinToken` in `solana.mjs`, using `@metaplex-foundation/mpl-token-metadata@2.x`,
+the pre-Umi generation, since it exports plain
+`web3.TransactionInstruction`-returning functions that compose directly
+into the `Transaction` this codebase already builds by hand — no adapter
+layer needed). Chose to keep this as *one* transaction rather than split it
+because there's no point where "half done" is a safe or recoverable state —
+a mint with revoked authority but no metadata, or metadata but a live mint
+authority, are both worse than the transaction just not having landed yet.
+
+**Required reordering `launchToken`:** metadata upload has to happen
+*before* minting now (the mint transaction needs a real URI to embed), so
+`uploadImage`/`uploadMetadata` moved ahead of `mintCoinToken` — previously
+the opposite order (mint first, then upload, then patch the DB record).
+`uploadImage`/`uploadMetadata` also dropped their now-pointless
+`mintAddress` parameter (there's no mint yet at upload time, and the Irys
+version never actually used it). Name/ticker byte-length validation
+(Metaplex's fixed 32/10-byte fields) moved to the very top of `launchToken`,
+before the fee is even broadcast — failing after the fee charged but before
+mint would otherwise burn the creator's fee for nothing.
+
+Verified for real on devnet: ran a full launch through the live API (fee →
+upload → mint → pool), then independently read back the mint account and
+the metadata PDA. Confirmed `mintAuthority: null`, `freezeAuthority: null`,
+metadata `isMutable: false`, and `name`/`symbol`/`uri` all match what was
+submitted — this is what tools like RugCheck/Solscan check for a token's
+"renounced" badges.

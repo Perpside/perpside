@@ -18,7 +18,7 @@ import {
 } from './solana.mjs';
 import { getSwapQuote, buildSwapTx, SOL_MINT } from './jupiter.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
-import { insertToken, insertPool, updateTokenStatus, updateTokenMedia, updateFirstBuy, getToken } from './db.mjs';
+import { insertToken, insertPool, updateTokenStatus, updateFirstBuy, getToken } from './db.mjs';
 import { splitSupplyEvenly } from './calibration.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -107,6 +107,12 @@ export function prepareFee({ creatorWallet, assetSymbols }) {
 export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64 }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
   if (!name || !ticker) throw new LaunchValidationError('name and ticker are required');
+  // Checked before the fee is ever charged, not after — these map directly
+  // to Metaplex's fixed on-chain field sizes for the metadata mintCoinToken
+  // creates, so a value that fails here would otherwise burn the creator's
+  // fee on a launch that can't finish.
+  if (Buffer.byteLength(name, 'utf8') > 32) throw new LaunchValidationError('name is too long for on-chain metadata (max 32 bytes)');
+  if (Buffer.byteLength(ticker, 'utf8') > 10) throw new LaunchValidationError('ticker is too long for on-chain metadata (max 10 bytes)');
   if (!signedFeeTxBase64) throw new LaunchValidationError('launch fee payment is required');
   const assets = assertAssets(assetSymbols);
 
@@ -116,26 +122,27 @@ export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, cr
     throw new LaunchValidationError('launch fee payment failed: ' + redactSecrets(err.message));
   }
 
+  // Image/metadata need to be uploaded *before* minting now — the coin's
+  // on-chain Metaplex metadata (created in the same transaction as the
+  // mint itself, see mintCoinToken) needs a real URI to point at, and that
+  // only exists once the upload lands.
+  const imageUrl = imageDataUrl ? await uploadImage(imageDataUrl) : null;
+  const metadataUri = await uploadMetadata({
+    name,
+    symbol: ticker,
+    description: `${name} (${ticker}) — launched on Perpside`,
+    image: imageUrl,
+  });
+
   // From here on the creator has already paid — a thrown error no longer
   // means "nothing happened", it means "stuck partway". Status is recorded
   // against the mint address as soon as it exists, so a partial failure is
   // a visible, diagnosable DB row instead of a silently dropped launch (see
   // db.mjs status/error_message columns).
-  const { mint } = await mintCoinToken();
-  insertToken({ mintAddress: mint, name, ticker, imageUrl: null, metadataUri: null, creatorWallet, firstBuyLamports: null, status: 'minting' });
+  const { mint } = await mintCoinToken({ name, symbol: ticker, metadataUri });
+  insertToken({ mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'pools_pending' });
 
   try {
-    const imageUrl = imageDataUrl ? await uploadImage(mint, imageDataUrl) : null;
-    const metadataUri = await uploadMetadata(mint, {
-      name,
-      symbol: ticker,
-      description: `${name} (${ticker}) — launched on Perpside`,
-      image: imageUrl,
-    });
-
-    updateTokenMedia(mint, imageUrl, metadataUri);
-    updateTokenStatus(mint, 'pools_pending');
-
     const shares = splitSupplyEvenly(1_000_000_000n, assets.length);
     const pools = [];
     for (let i = 0; i < assets.length; i++) {

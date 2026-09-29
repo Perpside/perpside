@@ -30,7 +30,7 @@ async function ensureFunded(irys, byteLength) {
   }
 }
 
-export async function uploadImage(mintAddress, dataUrl) {
+export async function uploadImage(dataUrl) {
   const match = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/.exec(dataUrl || '');
   if (!match) return null;
   const buffer = Buffer.from(match[2], 'base64');
@@ -41,7 +41,7 @@ export async function uploadImage(mintAddress, dataUrl) {
   return `${GATEWAY}/${receipt.id}`;
 }
 
-export async function uploadMetadata(mintAddress, metadata) {
+export async function uploadMetadata(metadata) {
   const data = Buffer.from(JSON.stringify(metadata));
 
   const irys = await getIrys();

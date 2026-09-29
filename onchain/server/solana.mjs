@@ -40,6 +40,7 @@ import {
   swapInternal,
 } from '@raydium-io/raydium-sdk-v2';
 import BN from 'bn.js';
+import bs58 from 'bs58';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -176,13 +177,23 @@ export function getConnection() {
   return connectionSingleton;
 }
 
+// PLATFORM_WALLET_SECRET arrives as either a JSON byte-array string (the
+// shape a secrets manager would inject, and how devnet-wallet.json is
+// still stored) or a base58 string (what a wallet like Phantom exports,
+// and the shape actually pasted into Railway for the real platform key) —
+// detected rather than assumed, since both are legitimate.
+function parseSecretKey(raw) {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('[')) return Uint8Array.from(JSON.parse(trimmed));
+  return bs58.decode(trimmed);
+}
+
 // The platform sponsors every launch — this keypair pays rent, fees, and
 // supplies the single-sided COIN liquidity itself. `creatorWallet` is still
 // required and recorded (see launch.mjs), but only for attribution; it never
 // signs anything.
 //
-// Key loading prefers PLATFORM_WALLET_SECRET (a JSON-array string, the shape
-// a secrets manager would inject at deploy time) over the plaintext
+// Key loading prefers PLATFORM_WALLET_SECRET over the plaintext
 // devnet-wallet.json file, so a real deploy never needs that file on disk —
 // see docs/token-launch-plan.md "Fee payer" for why this still isn't full
 // KMS/HSM custody (the Raydium SDK needs a local signer for `.execute()`).
@@ -190,9 +201,9 @@ export function getPlatformWallet() {
   if (!payerSingleton) {
     const fromEnv = process.env.PLATFORM_WALLET_SECRET;
     const secret = fromEnv
-      ? JSON.parse(fromEnv)
-      : JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'devnet-wallet.json')));
-    payerSingleton = Keypair.fromSecretKey(Uint8Array.from(secret));
+      ? parseSecretKey(fromEnv)
+      : Uint8Array.from(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'devnet-wallet.json'))));
+    payerSingleton = Keypair.fromSecretKey(secret);
   }
   return payerSingleton;
 }

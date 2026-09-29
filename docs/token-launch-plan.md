@@ -1193,3 +1193,23 @@ actual on-chain balance (not just the DB row) that it received exactly
 insertion order, with the remaining 90% (3496) splitting into
 community/creator/buyback at the token's configured ratio exactly as
 expected (1398/699/1399).
+
+## Platform wallet secret now accepts base58, not just a JSON byte array (2026-09-30)
+
+`PLATFORM_WALLET_SECRET` only ever accepted a JSON array string
+(`[1,2,3,...]`) — what a secrets manager would typically inject, but not
+what a wallet like Phantom actually exports when you ask it for a
+private key (a base58 string). The real platform key for the mainnet
+rollout was set as base58, so `getPlatformWallet()` needed to handle
+both. `parseSecretKey()` now detects the shape (`[` prefix → JSON array,
+otherwise base58 via the `bs58` package, added as a direct dependency
+rather than relying on it being present transitively through
+`@solana/web3.js`) instead of assuming one. `devnet-wallet.json`'s own
+format is untouched — this only changes what the env var accepts.
+
+Verified with synthetic keypairs, not just reasoning about the code: a
+fresh `Keypair.generate()`'s secret round-tripped correctly through both
+`parseSecretKey` paths (base58 and JSON array), and the existing
+`devnet-wallet.json` fallback still resolves to the known platform
+address with the env var unset — confirming this is additive, not a
+change to the existing paths.

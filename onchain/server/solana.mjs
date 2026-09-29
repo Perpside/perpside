@@ -1,13 +1,4 @@
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  SystemProgram,
-  Transaction,
-  TransactionMessage,
-  VersionedTransaction,
-  sendAndConfirmTransaction,
-} from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
   MINT_SIZE,
@@ -16,7 +7,6 @@ import {
   createAssociatedTokenAccountInstruction,
   createMintToInstruction,
   createSetAuthorityInstruction,
-  createBurnInstruction,
   AuthorityType,
   getAssociatedTokenAddress,
   getAccount,
@@ -29,8 +19,12 @@ import {
   Raydium,
   DEVNET_PROGRAM_ID,
   CLMM_PROGRAM_ID,
+  CLMM_LOCK_PROGRAM_ID,
+  CLMM_LOCK_AUTH_ID,
   TxVersion,
   getPdaExBitmapAccount,
+  getPdaPersonalPositionAddress,
+  PersonalPositionLayout,
   TickArrayBitmapExtensionLayout,
   swapInternal,
 } from '@raydium-io/raydium-sdk-v2';
@@ -50,6 +44,8 @@ export const RPC_URL = process.env.RPC_URL || process.env.DEVNET_RPC_URL;
 if (!RPC_URL) throw new Error('set RPC_URL (or the legacy DEVNET_RPC_URL) in .env');
 
 export const CLMM_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_PROGRAM_ID;
+export const CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_PROGRAM_ID;
+export const CLMM_LOCK_AUTH_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_AUTH_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_AUTH_ID;
 
 // Some RPC-client error messages embed the request URL, which carries our
 // API key in its query string — strip it before any such message can reach
@@ -307,16 +303,7 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
   const rawPoolId = poolKeys.id ?? poolKeys.poolId;
   const poolId = typeof rawPoolId === 'string' ? rawPoolId : rawPoolId.toBase58();
 
-  // Built, not executed, here — a burn instruction gets appended to this
-  // same transaction below before it's ever sent, so the position NFT is
-  // destroyed in the same atomic transaction that mints it. Raydium's
-  // decreaseLiquidity/closePosition both require presenting a token account
-  // holding that exact NFT (see decreaseLiquidityV2Instruction's nftAccount
-  // param) — once total supply is 0, that requirement can never be
-  // satisfied again, by anyone, including the platform. This is what makes
-  // "the platform can't withdraw a coin's starting liquidity" a provable
-  // fact instead of a promise — see docs/token-launch-plan.md.
-  const { transaction: openTx, signers: openSigners, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
+  const { execute: executeOpen, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
     poolInfo: mockPoolInfo,
     poolKeys,
     ownerInfo: { useSOLBalance: true },
@@ -334,37 +321,43 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     otherAmountMax: new BN(1000),
     txVersion: TxVersion.V0,
   });
-
+  const openResult = await executeOpen({ sendAndConfirm: true });
   const positionNftMint = openExtInfo.nftMint;
-  const nftAta = await getAssociatedTokenAddress(positionNftMint, payer.publicKey);
-  const burnIx = createBurnInstruction(nftAta, positionNftMint, payer.publicKey, 1, [], TOKEN_PROGRAM_ID);
 
-  // Read the lookup table keys the compiled message actually references,
-  // straight off the message itself — buildProps.lookupTableAddress isn't
-  // reliably populated, but addressTableLookups always is when a table was
-  // used, since decompiling needs it either way.
-  let lookupTableAccounts = [];
-  const tableKeys = openTx.message.addressTableLookups?.map((l) => l.accountKey) ?? [];
-  if (tableKeys.length) {
-    const fetched = await Promise.all(tableKeys.map((key) => connection.getAddressLookupTable(key)));
-    lookupTableAccounts = fetched.map((r) => r.value).filter(Boolean);
-  }
+  // Locked immediately via Raydium's own Lock CL Position program — *not*
+  // burned. A burn permanently forfeits this position's accrued trading
+  // fees too (decreaseLiquidity is CLMM's only fee-harvesting path, and it
+  // requires presenting the position NFT, burned or not), which would
+  // also foreclose the Reward Model's fee collection forever. lockPosition
+  // gives the same "can never be withdrawn, by anyone, including the
+  // platform" guarantee while leaving harvestLockPosition available to
+  // collect fees from the locked position later. Needs the position
+  // account to actually exist on-chain first (Raydium decodes it from a
+  // fresh RPC read), so unlike the mint step this can't be one transaction
+  // with openPositionFromBase — see docs/token-launch-plan.md.
+  const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, positionNftMint).publicKey;
+  const positionAccountInfo = await connection.getAccountInfo(positionPda);
+  const ownerPosition = PersonalPositionLayout.decode(positionAccountInfo.data);
 
-  const decompiled = TransactionMessage.decompile(openTx.message, { addressLookupTableAccounts: lookupTableAccounts });
-  decompiled.instructions.push(burnIx);
-  const combinedTx = new VersionedTransaction(decompiled.compileToV0Message(lookupTableAccounts));
-  combinedTx.sign([payer, ...openSigners]);
-
-  const openTxId = await broadcastSignedTx(Buffer.from(combinedTx.serialize()).toString('base64'), 'open position + burn NFT');
+  const { execute: executeLock, extInfo: lockExtInfo } = await raydium.clmm.lockPosition({
+    programId: CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER,
+    authProgramId: CLMM_LOCK_AUTH_ID_FOR_CLUSTER,
+    poolProgramId: CLMM_PROGRAM_ID_FOR_CLUSTER,
+    ownerPosition,
+    txVersion: TxVersion.V0,
+  });
+  const lockResult = await executeLock({ sendAndConfirm: true });
 
   return {
     poolId,
     positionNftMint: positionNftMint.toBase58(),
+    lockNftMint: lockExtInfo.lockNftMint.toBase58(),
     tickLower,
     tickUpper,
     startPrice: startPrice.toString(),
     createTx: createResult?.txId ?? String(createResult),
-    openTx: openTxId,
+    openTx: openResult?.txId ?? String(openResult),
+    lockTx: lockResult?.txId ?? String(lockResult),
   };
 }
 

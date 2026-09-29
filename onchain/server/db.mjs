@@ -45,6 +45,11 @@ db.exec(`
     backing_asset_mint TEXT NOT NULL,
     pool_address TEXT NOT NULL,
     position_nft_mint TEXT NOT NULL,
+    -- Set once the position is locked via Raydium's Lock CL Position
+    -- program (see solana.mjs createPoolAndPosition) — needed later to call
+    -- harvestLockPosition and collect this position's accrued trading fees
+    -- without ever being able to withdraw the underlying liquidity itself.
+    lock_nft_mint TEXT,
     tick_lower INTEGER NOT NULL,
     tick_upper INTEGER NOT NULL,
     initial_price TEXT NOT NULL,
@@ -67,6 +72,10 @@ for (const col of ['x_link', 'telegram_link', 'website_link']) {
 }
 for (const col of ['community_fee', 'creator_fee', 'buyback_fee']) {
   if (!tokenColumns.includes(col)) db.exec(`ALTER TABLE tokens ADD COLUMN ${col} REAL`);
+}
+const poolColumns = db.prepare("PRAGMA table_info(token_pools)").all().map((c) => c.name);
+if (!poolColumns.includes('lock_nft_mint')) {
+  db.exec('ALTER TABLE token_pools ADD COLUMN lock_nft_mint TEXT');
 }
 
 export function insertToken({
@@ -100,11 +109,11 @@ export function updateFirstBuy(mintAddress, lamports) {
   db.prepare('UPDATE tokens SET first_buy_lamports = ? WHERE mint_address = ?').run(lamports, mintAddress);
 }
 
-export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice }) {
+export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, lockNftMint, tickLower, tickUpper, initialPrice }) {
   db.prepare(`
-    INSERT INTO token_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, position_nft_mint, tick_lower, tick_upper, initial_price, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice, new Date().toISOString());
+    INSERT INTO token_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, position_nft_mint, lock_nft_mint, tick_lower, tick_upper, initial_price, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, positionNftMint, lockNftMint ?? null, tickLower, tickUpper, initialPrice, new Date().toISOString());
 }
 
 // error_message is deliberately excluded here — it's a raw internal

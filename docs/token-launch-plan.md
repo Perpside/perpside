@@ -705,3 +705,55 @@ Updated "How It Works" to match — the Overview section states the lock as
 fact rather than the Risk section disclosing its absence, and the
 Risk & Disclaimers paragraph now separates what's still centralized (who
 creates a coin) from what's provably locked (what happens to it after).
+
+## Correction: lock the position, don't burn it (2026-09-29)
+
+The burn approach above was wrong, caught immediately by asking "will fee
+collection still work?" — worth keeping both entries rather than editing
+history, since the reasoning that led to the mistake and the fix are both
+useful. Short version: **burning the position NFT permanently forfeits
+that position's trading fees too, with no way to ever recover them** — and
+that closes off the Reward Model's fee collection forever, not just for
+this beta phase.
+
+**Why.** Raydium CLMM has no pool-level "creator fee" the way CPMM and
+Raydium's own Launchpad product do (`collectCreatorFees` /
+`claimCreatorFee` — both confirmed to live on those other classes, not
+Clmm, by reading the SDK's class methods directly). For a CLMM position,
+`decreaseLiquidity` is the *only* way to harvest a position's accrued
+trading fees — there's no separate fee-only collect call — and it requires
+presenting the position NFT. Burn it, and that requirement becomes
+permanently unsatisfiable, by anyone, forever — which was exactly the
+point for the principal, but it takes the fees down with it.
+
+**The fix: Raydium's own Lock CL Position program**
+(`CLMM_LOCK_PROGRAM_ID`), built for precisely this case.
+`raydium.clmm.lockPosition` transfers the position NFT into the lock
+program's custody and mints a separate *lock* NFT to the platform as a
+claim ticket; `raydium.clmm.harvestLockPosition` uses that claim ticket to
+collect the position's accrued fees without ever being able to touch the
+underlying liquidity. Same "no one can withdraw this, ever" guarantee as
+burning, none of the downside.
+
+**What changed in `createPoolAndPosition`:** `openPositionFromBase` is
+back to being executed normally (no more manual transaction
+decompile/recompile — that whole approach existed only to append the burn
+instruction). Locking happens as a genuine third transaction afterward,
+not fused into the open-position transaction — `lockPosition` needs
+`ownerPosition`, the *decoded on-chain position account*
+(`PersonalPositionLayout.decode`), which doesn't exist to read until the
+open-position transaction has already confirmed. A launch with one backing
+asset is now 3 platform-signed transactions for that pool (create, open,
+lock) instead of 2.
+
+`token_pools` gained a `lock_nft_mint` column — the harvest claim ticket,
+needed later whenever fee collection actually gets built.
+
+**Verified for real on devnet, the whole chain:** launched a coin, confirmed
+the position NFT (supply 1, untouched) is held by the lock program's PDA
+rather than the platform wallet directly, confirmed the platform holds the
+lock NFT instead. Ran a real swap against the locked pool to confirm
+trading is unaffected. Then, separately, called `harvestLockPosition`
+directly against that same locked position and got back a real confirmed
+transaction — proving the full lock → trade → harvest cycle actually
+works, not just that it compiles.

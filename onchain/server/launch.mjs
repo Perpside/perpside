@@ -168,6 +168,7 @@ export async function launchToken({
         backingAssetMint: asset.mint,
         poolAddress: result.poolId,
         positionNftMint: result.positionNftMint,
+        lockNftMint: result.lockNftMint,
         tickLower: result.tickLower,
         tickUpper: result.tickUpper,
         initialPrice: result.startPrice,

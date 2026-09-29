@@ -1206,6 +1206,11 @@
   .launch-preview {
     flex-shrink: 0;
     width: 240px;
+    position: sticky;
+    /* Clears the sticky header (26px logo + ~44px tallest header button +
+       0.75rem top/bottom padding) so the preview pins just below it
+       instead of scrolling underneath. */
+    top: 76px;
   }
 
   .launch-preview__label {
@@ -1229,6 +1234,9 @@
 
     .launch-preview {
       width: 100%;
+      /* Stacked layout here, not side-by-side — nothing for it to usefully
+         stick against, so it scrolls normally like the rest of the page. */
+      position: static;
     }
 
     .launch-preview__grid {

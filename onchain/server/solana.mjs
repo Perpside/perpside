@@ -288,12 +288,19 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
   const coinToken = toApiV3Token(coinMint, COIN_DECIMALS, 'COIN');
   const assetToken = toApiV3Token(asset.mint, asset.decimals, asset.symbol);
 
-  const { execute: executeCreate, extInfo: createExtInfo } = await raydium.clmm.createPool({
+  // createCustomizablePool instead of the plain createPool so fees can be
+  // pinned to the backing asset (collectFeeOnMint) instead of accruing
+  // split across both tokens depending on swap direction — the backing
+  // asset is the liquid, useful-to-holders side; COIN itself is what a
+  // future Buyback & Burn step would need to swap into anyway, so there's
+  // no benefit to collecting fees in COIN before that step exists.
+  const { execute: executeCreate, extInfo: createExtInfo } = await raydium.clmm.createCustomizablePool({
     programId: CLMM_PROGRAM_ID_FOR_CLUSTER,
     mint1: coinIsMintA ? coinToken : assetToken,
     mint2: coinIsMintA ? assetToken : coinToken,
     ammConfig: AMM_CONFIG,
     initialPrice: startPrice,
+    collectFeeOnMint: new PublicKey(asset.mint),
     txVersion: TxVersion.V0,
   });
   const createResult = await executeCreate({ sendAndConfirm: true });

@@ -757,3 +757,33 @@ trading is unaffected. Then, separately, called `harvestLockPosition`
 directly against that same locked position and got back a real confirmed
 transaction — proving the full lock → trade → harvest cycle actually
 works, not just that it compiles.
+
+## Fees pinned to the backing asset, not COIN (2026-09-29)
+
+Prompted by noticing Raydium's UI offers a fee-token choice when creating a
+CLMM pool. By default (`createPool`, what this codebase used until now),
+a pool's trading fees accrue split across both tokens depending on swap
+direction — a COIN→xSOL trade pays its fee in COIN, xSOL→COIN pays in
+xSOL. Switched to `createCustomizablePool` with `collectFeeOnMint` set to
+the backing asset's mint, so every trade's fee settles in the backing
+asset regardless of direction — confirmed directly on Raydium's own
+on-chain program source (`fee_on: u8 // 0 = FromInput, 1 = Token0Only,
+2 = Token1Only`, in `raydium-clmm/programs/amm/src/states/pool.rs`) by
+decoding a real created pool's account and checking `feeOn` matches
+whichever side the backing asset landed on.
+
+**Why the backing asset, not COIN.** The backing asset (xSOL/xBTC/xHYPE or
+whatever custom token was picked) is liquid and useful to holders the
+moment it's collected — a fresh COIN isn't. Buyback & Burn will need a
+swap step (backing asset → COIN, immediately before burning) once it's
+built, but Community and Creator payouts are better off in the backing
+asset directly, and collecting in COIN would've meant *every* reward path
+needed a swap, not just Buyback & Burn. Fee collection/distribution itself
+is still not built (see "Explicitly deferred") — this only decides what
+currency it'll be in once it is.
+
+Verified for real on devnet: launched a coin through the live API with the
+new pool-creation call, decoded the resulting pool account directly, and
+confirmed `feeOn = 2` (Token1Only) with the backing asset as mintB —
+matches intent exactly, cross-checked against the program's own source
+rather than assumed from the SDK type alone.

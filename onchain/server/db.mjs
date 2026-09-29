@@ -18,6 +18,17 @@ db.exec(`
     metadata_uri TEXT,
     creator_wallet TEXT,
     first_buy_lamports INTEGER,
+    x_link TEXT,
+    telegram_link TEXT,
+    website_link TEXT,
+    -- Reward-model config the creator picked at launch (see the launch
+    -- form's Community/Creator/Buyback toggles). Stored so Explore can
+    -- display what a launch is configured for; collecting and distributing
+    -- these fees is still a separate, not-yet-built phase — see
+    -- docs/token-launch-plan.md "Explicitly deferred".
+    community_fee REAL,
+    creator_fee REAL,
+    buyback_fee REAL,
     -- 'minting' -> 'pools_pending' -> 'complete', or 'failed' with
     -- error_message set. A launch stuck on anything but 'complete' means the
     -- fee was already collected but the platform hasn't finished its side —
@@ -51,12 +62,28 @@ if (!tokenColumns.includes('status')) {
 if (!tokenColumns.includes('error_message')) {
   db.exec('ALTER TABLE tokens ADD COLUMN error_message TEXT');
 }
+for (const col of ['x_link', 'telegram_link', 'website_link']) {
+  if (!tokenColumns.includes(col)) db.exec(`ALTER TABLE tokens ADD COLUMN ${col} TEXT`);
+}
+for (const col of ['community_fee', 'creator_fee', 'buyback_fee']) {
+  if (!tokenColumns.includes(col)) db.exec(`ALTER TABLE tokens ADD COLUMN ${col} REAL`);
+}
 
-export function insertToken({ mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status }) {
+export function insertToken({
+  mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status,
+  xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
+}) {
   db.prepare(`
-    INSERT INTO tokens (mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(mintAddress, name, ticker, imageUrl ?? null, metadataUri ?? null, creatorWallet ?? null, firstBuyLamports ?? null, status ?? 'minting', new Date().toISOString());
+    INSERT INTO tokens (
+      mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status,
+      x_link, telegram_link, website_link, community_fee, creator_fee, buyback_fee, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    mintAddress, name, ticker, imageUrl ?? null, metadataUri ?? null, creatorWallet ?? null, firstBuyLamports ?? null, status ?? 'minting',
+    xLink ?? null, telegramLink ?? null, websiteLink ?? null, communityFee ?? null, creatorFee ?? null, buybackFee ?? null,
+    new Date().toISOString()
+  );
 }
 
 export function updateTokenStatus(mintAddress, status, errorMessage) {
@@ -85,7 +112,10 @@ export function insertPool({ id, mintAddress, backingAsset, backingAssetMint, po
 // the RPC URL/API key embedded) meant for server-side debugging only, not
 // for the public, unauthenticated /api/tokens response. `status` alone is
 // enough for the client to know a launch didn't finish cleanly.
-const PUBLIC_TOKEN_COLUMNS = 'mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status, created_at';
+const PUBLIC_TOKEN_COLUMNS = `
+  mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status,
+  x_link, telegram_link, website_link, community_fee, creator_fee, buyback_fee, created_at
+`;
 
 export function getToken(mintAddress) {
   const token = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE mint_address = ?`).get(mintAddress);

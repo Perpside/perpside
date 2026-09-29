@@ -104,7 +104,10 @@ export function prepareFee({ creatorWallet, assetSymbols }) {
 // Step 2: broadcast the creator-signed fee tx, confirm it landed (that
 // confirmation is itself the proof the creator paid — see solana.mjs), then
 // run the platform-sponsored mint + pool creation exactly as before.
-export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64 }) {
+export async function launchToken({
+  name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64,
+  xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
+}) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
   if (!name || !ticker) throw new LaunchValidationError('name and ticker are required');
   // Checked before the fee is ever charged, not after — these map directly
@@ -140,7 +143,10 @@ export async function launchToken({ name, ticker, imageDataUrl, assetSymbols, cr
   // a visible, diagnosable DB row instead of a silently dropped launch (see
   // db.mjs status/error_message columns).
   const { mint } = await mintCoinToken({ name, symbol: ticker, metadataUri });
-  insertToken({ mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'pools_pending' });
+  insertToken({
+    mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'pools_pending',
+    xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
+  });
 
   try {
     const shares = splitSupplyEvenly(1_000_000_000n, assets.length);

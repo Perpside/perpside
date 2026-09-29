@@ -615,3 +615,47 @@ the metadata PDA. Confirmed `mintAuthority: null`, `freezeAuthority: null`,
 metadata `isMutable: false`, and `name`/`symbol`/`uri` all match what was
 submitted — this is what tools like RugCheck/Solscan check for a token's
 "renounced" badges.
+
+## Explore is now a real, shared view of the DB (2026-09-29)
+
+Found while making an unrelated UI tweak: Explore was rendering from
+`localStorage` (`PerpsideTokens`, keyed `perpside_launched_tokens`) the
+entire time, even though the real backend DB already had every launch's
+actual data from day one. That meant a launch only ever showed up in
+Explore *in the browser that launched it* — nobody else would ever see it.
+`GET /api/tokens` worked and had been tested repeatedly all session; the
+frontend just never called it.
+
+Fixed: `PerpsideTokens` is gone. Explore's IIFE now fetches
+`GET /api/tokens` (cached client-side, re-fetched on page load and right
+after a launch — filter/search still work instantly against the cache, no
+re-fetch per keystroke) and maps each row to what `renderCard` expects.
+Only `status === 'complete'` rows are shown — a launch still minting, still
+creating pools, or that failed partway isn't a real tradeable token yet.
+
+This surfaced two fields Explore's card always expected that the backend
+never actually stored:
+- **Social links** (`x`/`telegram`/`website`) — captured client-side by the
+  form the whole time, but never sent to `/api/launch`. New `x_link`,
+  `telegram_link`, `website_link` columns on `tokens`, now populated.
+- **Reward model** (Community/Creator/Buyback percentages) — same story.
+  New `community_fee`/`creator_fee`/`buyback_fee` REAL columns. Worth being
+  clear about what this does and doesn't mean: it's stored so Explore can
+  display what a launch is *configured* for, not evidence that any fee
+  collection is happening — harvesting and distributing these is still the
+  separate, not-yet-built phase this doc has called out since the start
+  ("Explicitly deferred").
+
+`cap` (market cap) shown on real cards is `targetFdvUsd` from
+`/api/launch-config` for every token — every launch is calibrated to the
+same starting FDV, and that's cheap to show. It is **not** a live cap;
+computing that for real would mean an RPC round trip per pool per card on
+every Explore render, which doesn't scale to a grid. Live pricing on
+Explore is an open item, not attempted here.
+
+Verified for real: launched a token through the live API with social links
+and a reward-model config set, confirmed it round-tripped through
+`GET /api/tokens` exactly as stored, then ran the actual `mapDbToken`
+function from `index.html` (not a reimplementation — extracted and executed
+verbatim) against that real response and confirmed it produces exactly the
+shape `renderCard` expects.

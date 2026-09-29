@@ -2208,29 +2208,6 @@
   </div>
 
   <script>
-    var PerpsideTokens = (function () {
-      var KEY = 'perpside_launched_tokens';
-
-      function getAll() {
-        try {
-          var raw = localStorage.getItem(KEY);
-          return raw ? JSON.parse(raw) : [];
-        } catch (e) {
-          return [];
-        }
-      }
-
-      function add(token) {
-        var list = getAll();
-        list.push(token);
-        try {
-          localStorage.setItem(KEY, JSON.stringify(list));
-        } catch (e) {}
-        return list;
-      }
-
-      return { getAll: getAll, add: add };
-    })();
 
     (function () {
       var landingScreen = document.getElementById('landingScreen');
@@ -2326,6 +2303,8 @@
       var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
       if (!pages.length) return;
 
+      var headerLaunchBtn = document.getElementById('headerLaunchBtn');
+
       // Tracks the page being left so a "back" button (launchBackBtn,
       // howBackBtn) can return there instead of a hardcoded destination —
       // landing-entry points override this to 'landing' right after calling
@@ -2340,6 +2319,9 @@
         pages.forEach(function (page) {
           page.hidden = page.id !== 'page-' + name;
         });
+        // No point offering "Launch coin" in the header while already on
+        // the launch page itself.
+        if (headerLaunchBtn) headerLaunchBtn.hidden = name === 'portfolio';
       };
     })();
 
@@ -2367,6 +2349,10 @@
       var searchInput = document.getElementById('exploreSearchInput');
       var filters = document.getElementById('exploreFilters');
       if (!grid || !filters) return;
+
+      // Local dev serves index.html and the API off different ports; in
+      // production the same Express service serves both.
+      var LAUNCH_API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
 
       var palettes = [
         ['#2dd4bf', '#0ea5e9'],
@@ -2474,12 +2460,68 @@
         return card;
       }
 
+      // Explore is a shared view of every launch, not a per-browser one —
+      // it loads from the backend DB (GET /api/tokens), not localStorage.
+      // Cached here and only re-fetched on page load or right after a
+      // launch; filter/search stay instant against the cached list, same
+      // as before.
+      var tokensCache = [];
+      var launchConfigCache = null;
+
+      function fetchLaunchConfig() {
+        if (launchConfigCache) return Promise.resolve(launchConfigCache);
+        return fetch(LAUNCH_API_URL + '/api/launch-config')
+          .then(function (res) { return res.json(); })
+          .then(function (data) { launchConfigCache = data; return data; })
+          .catch(function () { return null; });
+      }
+
+      // Only 'complete' launches show up — anything still minting/pending
+      // pools, or that failed partway, isn't a real tradeable token yet
+      // (see docs/token-launch-plan.md tokens.status).
+      function mapDbToken(t) {
+        return {
+          mint: t.mint_address,
+          name: t.name,
+          ticker: t.ticker,
+          image: t.image_url || undefined,
+          cap: launchConfigCache ? launchConfigCache.targetFdvUsd : 5000,
+          createdAt: t.created_at ? new Date(t.created_at).getTime() : 0,
+          position: (t.pools || []).map(function (p) {
+            return { asset: p.backing_asset, icon: assetIconMap[p.backing_asset] };
+          }),
+          rewardModel: {
+            community: t.community_fee || 0,
+            creator: t.creator_fee || 0,
+            buyback: t.buyback_fee || 0
+          },
+          firstBuy: t.first_buy_lamports ? t.first_buy_lamports / 1e9 : undefined,
+          links: {
+            x: t.x_link || undefined,
+            telegram: t.telegram_link || undefined,
+            website: t.website_link || undefined
+          }
+        };
+      }
+
+      function fetchTokens() {
+        return Promise.all([
+          fetch(LAUNCH_API_URL + '/api/tokens').then(function (res) { return res.json(); }),
+          fetchLaunchConfig()
+        ]).then(function (results) {
+          var tokens = Array.isArray(results[0]) ? results[0] : [];
+          tokensCache = tokens.filter(function (t) { return t.status === 'complete'; }).map(mapDbToken);
+        }).catch(function () {
+          tokensCache = [];
+        });
+      }
+
       function render() {
         var activeFilter = filters.querySelector('.explore-filter.active');
         var mode = activeFilter ? activeFilter.getAttribute('data-filter') : 'trending';
         var query = ((searchInput && searchInput.value) || '').trim().toLowerCase();
 
-        var list = PerpsideTokens.getAll().slice().reverse();
+        var list = tokensCache.slice().reverse();
         if (mode === 'new') {
           list.sort(function (a, b) { return b.createdAt - a.createdAt; });
         } else if (mode === 'top') {
@@ -2524,9 +2566,9 @@
         }
       });
 
-      window.renderExploreGrid = render;
+      window.renderExploreGrid = function () { return fetchTokens().then(render); };
       window.renderTokenCard = renderCard;
-      render();
+      fetchTokens().then(render);
     })();
 
     (function () {
@@ -3306,32 +3348,16 @@
               imageDataUrl: selectedImage,
               assetSymbols: selectedAssets,
               creatorWallet: creatorWallet,
-              signedFeeTxBase64: signedFeeTxBase64
+              signedFeeTxBase64: signedFeeTxBase64,
+              xLink: x || undefined,
+              telegramLink: telegram || undefined,
+              websiteLink: website || undefined,
+              communityFee: communityEnabled ? communityFee : 0,
+              creatorFee: creatorEnabled ? creatorFee : 0,
+              buybackFee: buybackEnabled ? buybackFee : 0
             });
           })
           .then(function (data) {
-            PerpsideTokens.add({
-              name: name,
-              ticker: ticker,
-              image: selectedImage || undefined,
-              cap: Math.floor(3000 + Math.random() * 12000),
-              createdAt: Date.now(),
-              mint: data.mint,
-              pools: data.pools,
-              position: selectedAssets.map(function (a) { return { asset: a, icon: assetIconMap[a] }; }),
-              rewardModel: {
-                community: communityEnabled ? communityFee : 0,
-                creator: creatorEnabled ? creatorFee : 0,
-                buyback: buybackEnabled ? buybackFee : 0
-              },
-              firstBuy: isNaN(firstBuyAmount) || firstBuyAmount <= 0 ? undefined : firstBuyAmount,
-              links: {
-                x: x || undefined,
-                telegram: telegram || undefined,
-                website: website || undefined
-              }
-            });
-
             // The launch itself already succeeded at this point — a First
             // Buy failure shouldn't read as the whole launch failing, so it
             // gets its own non-blocking message instead of the outer catch.

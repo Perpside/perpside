@@ -1257,3 +1257,34 @@ to complete a real launch until `RPC_URL` is pointed at an actual paid
 mainnet RPC endpoint (see "What's needed for mainnet" — this was always
 called out as a separate blocker from the backing-assets/wallet-funding
 work, and still is).
+
+## Back-button bug: single "previous page" slot, not a real stack (2026-09-30)
+
+Reported: open a coin's page from Explore, go to How it Works, then hit
+Back twice — instead of unwinding to Explore, the second Back bounced
+right back to How it Works. Root cause was `window.__perpsidePrevAppPage`
+— a single slot, not a stack. `showAppPage(name)` unconditionally set it
+to whatever page was being *left*, including when that "navigation" was
+itself a Back click. So Token → How (prev='token') → Back (prev='how',
+now showing token) → Back (prev='token' again, now showing how) — ping-
+ponging between the last two pages forever instead of continuing to
+unwind, the moment there were two forward navigations in a row.
+
+Replaced with `window.__perpsideAppStack`, a real array. `showAppPage`
+pushes onto it when navigating to a genuinely new page; `goBackFrom` pops
+the current page off first, then calls `showAppPage` with whatever's now
+on top — which `showAppPage` sees as already equal to the stack's top and
+correctly doesn't re-push. 'landing' can be an entry in the same stack
+(reset there by the two entry points that need it — the landing hero's
+"Launch" button and the "How it Works" landing link) even though it isn't
+one of the `.page` elements `showAppPage` renders; `goBackFrom` pops it
+too and hands off to `showLanding()` when it's on top.
+
+Verified in a real browser, not just by re-reading the logic: reproduced
+the exact reported sequence (Explore → Token → How it Works → Back →
+Back) and confirmed it now unwinds to Explore instead of bouncing: stack
+went `['earn'] → ['earn','token'] → ['earn','token','how'] →
+['earn','token'] → ['earn']`. Also checked both landing-entry paths
+(hero "Launch" button, footer "How it Works" link) still return to
+landing correctly, and a deeper four-level chain (Explore → Token → How →
+Launch, three Backs) unwinds one page at a time exactly as expected.

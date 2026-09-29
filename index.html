@@ -2703,12 +2703,17 @@
         appScreen.hidden = true;
       }
 
-      // The Launch and How-it-works pages' back buttons need to know where
-      // the user actually came from (landing, or whichever app page they
-      // were on) instead of always landing on a hardcoded page — see
-      // window.__perpsidePrevAppPage, set by showAppPage itself further
-      // down, and the 'landing' overrides right after each landing-entry
-      // pushState below.
+      // The Launch/How-it-works/Token pages' back buttons need to unwind
+      // wherever the user actually came from — a real stack
+      // (window.__perpsideAppStack, defined by showAppPage further down),
+      // not just a single "previous page" slot. A single slot breaks the
+      // moment there are two forward navigations in a row (Explore -> Token
+      // -> How it Works): Back would set "previous" to the page being
+      // *left*, so a second Back bounces right back to it instead of
+      // continuing to unwind — see goBackFrom's own comment for the fix.
+      // 'landing' can appear as an entry in that same stack (reset here,
+      // right after each landing-entry pushState below) even though it
+      // isn't one of the .page elements showAppPage knows how to render.
       // Clean path instead of a #hash — the hash never reached the server,
       // so a direct load/refresh of /app needs server-side support too
       // (see server/index.mjs, which now serves index.html for it as well).
@@ -2724,8 +2729,11 @@
           showApp();
           history.pushState({ screen: 'app' }, '', APP_PATH);
           var isLaunch = btn.id === 'heroLaunchBtn';
+          // Reset *before* showAppPage so its push lands on top of
+          // ['landing'] — only the launch entry point needs this; landing
+          // ('earn'/Explore) has no back button of its own to unwind from.
+          if (isLaunch) window.__perpsideAppStack = ['landing'];
           if (window.showAppPage) window.showAppPage(isLaunch ? 'portfolio' : 'earn');
-          if (isLaunch) window.__perpsidePrevAppPage = 'landing';
         });
       });
 
@@ -2743,8 +2751,8 @@
           e.preventDefault();
           showApp();
           history.pushState({ screen: 'app' }, '', APP_PATH);
+          window.__perpsideAppStack = ['landing'];
           if (window.showAppPage) window.showAppPage('how');
-          window.__perpsidePrevAppPage = 'landing';
         });
       }
 
@@ -2783,17 +2791,19 @@
 
       var headerLaunchBtn = document.getElementById('headerLaunchBtn');
 
-      // Tracks the page being left so a "back" button (launchBackBtn,
-      // howBackBtn) can return there instead of a hardcoded destination —
-      // landing-entry points override this to 'landing' right after calling
-      // showAppPage, since landing isn't one of these .page elements.
-      window.__perpsideCurrentAppPage = 'earn';
+      // A real navigation stack, not just a single "previous page" slot —
+      // Explore -> Token -> How it Works pushes twice, and Back (see
+      // goBackFrom) pops once per click instead of ping-ponging between the
+      // last two pages. 'landing' can appear as an entry here too (pushed
+      // by the landing-entry points above) even though it isn't one of
+      // these .page elements.
+      window.__perpsideAppStack = ['earn'];
 
       window.showAppPage = function (name) {
-        if (name !== window.__perpsideCurrentAppPage) {
-          window.__perpsidePrevAppPage = window.__perpsideCurrentAppPage;
+        var stack = window.__perpsideAppStack;
+        if (name !== stack[stack.length - 1]) {
+          stack.push(name);
         }
-        window.__perpsideCurrentAppPage = name;
         pages.forEach(function (page) {
           page.hidden = page.id !== 'page-' + name;
         });
@@ -4445,16 +4455,24 @@
       }
 
       // Returns to wherever the user actually came from — landing, or
-      // whichever app page they were on — instead of a hardcoded page.
-      // window.__perpsidePrevAppPage is kept current by showAppPage itself,
-      // with the landing-entry points overriding it to 'landing' since that
-      // screen isn't one of the .page elements showAppPage knows about.
+      // whichever app page they were on — by popping the shared navigation
+      // stack (window.__perpsideAppStack, see showAppPage) instead of
+      // pushing onto it. Popping first, then re-displaying whatever's now
+      // on top via the normal showAppPage(target) call, is what makes a
+      // chain of Back clicks unwind one page at a time — showAppPage sees
+      // target already equal to the new top and skips pushing it again,
+      // rather than the old single-slot version overwriting "previous"
+      // with the page being left and bouncing between the last two pages.
       function goBackFrom() {
-        if (window.__perpsidePrevAppPage === 'landing') {
+        var stack = window.__perpsideAppStack;
+        if (stack.length > 1) stack.pop();
+        var target = stack[stack.length - 1];
+        if (target === 'landing') {
+          stack.pop();
           if (window.__perpsideShowLanding) window.__perpsideShowLanding();
           return;
         }
-        if (window.showAppPage) window.showAppPage(window.__perpsidePrevAppPage || 'earn');
+        if (window.showAppPage) window.showAppPage(target || 'earn');
       }
 
       var launchBackBtn = document.getElementById('launchBackBtn');

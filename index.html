@@ -3212,12 +3212,9 @@
         });
       }
 
-      // Slider labels show both the share of the chosen fee and what that
-      // works out to in absolute % of trade volume, since the latter is
-      // what actually gets recorded and (eventually) paid out.
       function shareLabel(key) {
         var share = Math.round(shares[key]);
-        return share + '% of fee (' + absoluteFee(key) + '% of volume)';
+        return share + '% of fee';
       }
 
       function renderRewardRows() {

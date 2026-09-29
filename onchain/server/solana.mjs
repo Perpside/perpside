@@ -54,6 +54,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const CLUSTER = process.env.CLUSTER === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
 export const RPC_URL = process.env.RPC_URL || process.env.DEVNET_RPC_URL;
 if (!RPC_URL) throw new Error('set RPC_URL (or the legacy DEVNET_RPC_URL) in .env');
+// Caught the hard way: CLUSTER can be flipped to mainnet-beta independently
+// of RPC_URL, and every PDA derivation below silently uses whichever
+// program IDs CLUSTER says — against whatever RPC_URL actually points at.
+// A devnet RPC_URL with CLUSTER=mainnet-beta doesn't error, it just derives
+// addresses that don't exist on the endpoint it's querying (see
+// getPoolPendingFees/harvestPoolFees's "stale row" errors).
+if (CLUSTER === 'mainnet-beta' && /devnet/i.test(RPC_URL)) {
+  console.warn('CLUSTER=mainnet-beta but RPC_URL looks like a devnet endpoint — this will not work, set a real mainnet RPC_URL.');
+}
 
 export const CLMM_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_PROGRAM_ID;
 export const CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_PROGRAM_ID;
@@ -563,10 +572,24 @@ export async function buildFirstBuyTx({ poolId, coinMint, assetMint, buyerWallet
 export async function getPoolPendingFees({ poolAddress, positionNftMint, tickLower, tickUpper }, coinMint) {
   const connection = getConnection();
   const poolAccountInfo = await connection.getAccountInfo(new PublicKey(poolAddress));
+  // A stored pool/position address that doesn't resolve on the current
+  // RPC/CLUSTER almost always means this row was created under a
+  // *different* cluster than the one the backend is running against right
+  // now (e.g. a devnet launch left in the DB after CLUSTER flipped to
+  // mainnet-beta) — every PDA below is derived using
+  // CLMM_PROGRAM_ID_FOR_CLUSTER, so a cluster mismatch makes them resolve
+  // to addresses that were never created. Failing loudly here beats a bare
+  // "Cannot read properties of null" a few lines down.
+  if (!poolAccountInfo) {
+    throw new Error(`pool account not found for ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
+  }
   const poolState = PoolInfoLayout.decode(poolAccountInfo.data);
 
   const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(positionNftMint)).publicKey;
   const positionAccountInfo = await connection.getAccountInfo(positionPda);
+  if (!positionAccountInfo) {
+    throw new Error(`position account not found for ${positionPda.toBase58()} on ${CLUSTER} — likely a stale row from a different cluster`);
+  }
   const positionState = PersonalPositionLayout.decode(positionAccountInfo.data);
 
   const startIndexLower = TickArrayUtil.getTickArrayStartIndex(tickLower, poolState.tickSpacing);
@@ -577,6 +600,9 @@ export async function getPoolPendingFees({ poolAddress, positionNftMint, tickLow
   const sameArray = tickArrayLowerPda.equals(tickArrayUpperPda);
   const keys = sameArray ? [tickArrayLowerPda] : [tickArrayLowerPda, tickArrayUpperPda];
   const infos = await connection.getMultipleAccountsInfo(keys);
+  if (infos.some((info) => !info)) {
+    throw new Error(`tick array account not found for pool ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
+  }
   const lowerArray = TickArrayLayout.decode(infos[0].data);
   const upperArray = sameArray ? lowerArray : TickArrayLayout.decode(infos[1].data);
 
@@ -607,6 +633,9 @@ export async function harvestPoolFees({ poolAddress, lockNftMint }, backingAsset
 
   const lockDataPda = getPdaLockClPositionIdV2(CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER, new PublicKey(lockNftMint)).publicKey;
   const lockAccountInfo = await connection.getAccountInfo(lockDataPda);
+  if (!lockAccountInfo) {
+    throw new Error(`lock account not found for ${lockDataPda.toBase58()} on ${CLUSTER} — likely a stale row from a different cluster`);
+  }
   const lockData = LockClPositionLayoutV2.decode(lockAccountInfo.data);
 
   const assetAta = await getAssociatedTokenAddress(new PublicKey(backingAssetMint), payer.publicKey);

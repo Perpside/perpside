@@ -1213,3 +1213,47 @@ fresh `Keypair.generate()`'s secret round-tripped correctly through both
 `devnet-wallet.json` fallback still resolves to the known platform
 address with the env var unset — confirming this is additive, not a
 change to the existing paths.
+
+## Cron crash root-caused: CLUSTER flipped to mainnet-beta with RPC_URL still devnet (2026-09-30)
+
+Reward cron was failing every token with `Cannot read properties of null
+(reading 'data')` — an unhelpful crash from `getPoolPendingFees` calling
+`.data` on `connection.getAccountInfo(...)` without checking for null
+first. Reproduced directly (SSH into the live `perpside` container,
+which shares the same DB/env shape as `reward-cron`, and ran
+`reward-cron.mjs` by hand instead of waiting for the next scheduled
+tick) rather than guessing from the stack trace alone.
+
+Root cause: production's `CLUSTER` had been switched to `mainnet-beta`
+while `RPC_URL` was still pointing at the devnet Helius endpoint. Every
+PDA in `getPoolPendingFees`/`harvestPoolFees` is derived with
+`CLMM_PROGRAM_ID_FOR_CLUSTER`, which follows `CLUSTER` — so with
+`CLUSTER=mainnet-beta`, it derived *mainnet* program-owned addresses,
+then queried them against the *devnet* RPC, where they've never existed.
+`getAccountInfo` correctly returned `null` for an address that
+genuinely doesn't exist there; the bug was not checking for it.
+
+Two-part fix:
+- The two DB rows this actually broke were devnet test tokens
+  (`deBridge Mascot`, `Perpside`/PRPS) that have no business surviving
+  the mainnet cutover anyway — deleted directly from the production DB
+  (`tokens`, `token_pools`; `reward_payouts`/`reward_run_pools`/
+  `reward_runs` were already empty, the cron had never gotten far enough
+  to write any).
+- `getPoolPendingFees` and `harvestPoolFees` now throw a specific,
+  actionable error ("pool account not found for X on Y — likely a stale
+  row from a different cluster") instead of the bare null-dereference,
+  and `solana.mjs` warns at startup if `CLUSTER=mainnet-beta` is paired
+  with an `RPC_URL` that still looks like a devnet endpoint — this exact
+  misconfiguration should be visible in the first log line next time,
+  not discovered by every cron tick failing silently-ish for weeks.
+
+**Still an open problem, not fixed by this pass:** `RPC_URL` in
+production is still the devnet Helius endpoint. With `CLUSTER` now
+`mainnet-beta`, this doesn't just affect the cron — `launchToken` itself
+would try to mint/create pools under mainnet program IDs and broadcast
+against a devnet RPC, which cannot work. The site is effectively unable
+to complete a real launch until `RPC_URL` is pointed at an actual paid
+mainnet RPC endpoint (see "What's needed for mainnet" — this was always
+called out as a separate blocker from the backing-assets/wallet-funding
+work, and still is).

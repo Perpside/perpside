@@ -1,5 +1,14 @@
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, createMint, mintTo, getOrCreateAssociatedTokenAccount, getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import {
+  TOKEN_PROGRAM_ID,
+  MINT_SIZE,
+  getMinimumBalanceForRentExemptMint,
+  createInitializeMint2Instruction,
+  createAssociatedTokenAccountInstruction,
+  createMintToInstruction,
+  getAssociatedTokenAddress,
+  getAccount,
+} from '@solana/spl-token';
 import {
   Raydium,
   DEVNET_PROGRAM_ID,
@@ -190,13 +199,32 @@ export function broadcastFeeTx(signedTxBase64) {
 export async function mintCoinToken() {
   const connection = getConnection();
   const payer = getPlatformWallet();
-
-  const mint = await createMint(connection, payer, payer.publicKey, null, COIN_DECIMALS);
-  const ata = await getOrCreateAssociatedTokenAccount(connection, payer, mint, payer.publicKey);
+  const mintKeypair = Keypair.generate();
+  const mint = mintKeypair.publicKey;
+  const ata = await getAssociatedTokenAddress(mint, payer.publicKey);
   const totalAtomic = TOTAL_SUPPLY_WHOLE * 10n ** BigInt(COIN_DECIMALS);
-  await mintTo(connection, payer, mint, ata.address, payer, totalAtomic);
 
-  return { mint: mint.toBase58(), ata: ata.address.toBase58() };
+  // The individual @solana/spl-token helpers (createMint,
+  // getOrCreateAssociatedTokenAccount, mintTo) each send their own
+  // transaction — fine on their own, but three round trips for four small
+  // instructions that fit in one transaction's size limit with room to
+  // spare. Composed by hand instead: one transaction, one confirmation.
+  const rentLamports = await getMinimumBalanceForRentExemptMint(connection);
+  const tx = new Transaction().add(
+    SystemProgram.createAccount({
+      fromPubkey: payer.publicKey,
+      newAccountPubkey: mint,
+      space: MINT_SIZE,
+      lamports: rentLamports,
+      programId: TOKEN_PROGRAM_ID,
+    }),
+    createInitializeMint2Instruction(mint, COIN_DECIMALS, payer.publicKey, null, TOKEN_PROGRAM_ID),
+    createAssociatedTokenAccountInstruction(payer.publicKey, ata, payer.publicKey, mint, TOKEN_PROGRAM_ID),
+    createMintToInstruction(mint, ata, payer.publicKey, totalAtomic, [], TOKEN_PROGRAM_ID)
+  );
+  await sendAndConfirmTransaction(connection, tx, [payer, mintKeypair]);
+
+  return { mint: mint.toBase58(), ata: ata.toBase58() };
 }
 
 // Creates one CLMM pool for `coinMint` paired with `asset`, calibrated to

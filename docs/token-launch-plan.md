@@ -492,3 +492,37 @@ A failed First Buy never undoes the launch itself, which has already
 succeeded by the time First Buy runs — it surfaces as a distinct
 non-blocking message ("Coin launched, but First Buy failed: ... — you can
 still buy it from Explore") rather than the main launch-failure error.
+
+## Mint step: 3 transactions → 1 (2026-09-29)
+
+Prompted by a question about whether Solana's recent compute/size-limit
+changes could shrink a launch's transaction count. Short answer on that:
+the per-transaction CU cap is still 1.4M (unchanged — what actually grew is
+the *block-level* limit, 60M→100M CU, a throughput change, not a
+per-tx one), and the transaction *byte-size* cap did grow (1232→4096 bytes,
+mainnet epoch 1035, 2026-09-15) but only for a new `v1` transaction format
+that neither the Raydium SDK (`0.2.73-alpha`) nor, likely, wallets support
+building/signing yet — not usable today. That rules out shrinking the pool
+steps (`createPool` + `openPositionFromBase` per asset, 2 tx × N, the
+expensive part) for now.
+
+The mint step was a different story, unrelated to any of that: `createMint`
++ `getOrCreateAssociatedTokenAccount` + `mintTo` were three separate
+`@solana/spl-token` convenience calls, each sending its own transaction —
+not because they needed to, just because each helper is self-contained.
+`mintCoinToken` in `solana.mjs` now composes the same four instructions
+(`SystemProgram.createAccount`, `createInitializeMint2Instruction`,
+`createAssociatedTokenAccountInstruction`, `createMintToInstruction`) into
+one legacy transaction by hand. Comfortably under the existing 1232-byte
+limit — nothing about this needed the new size increase.
+
+Verified for real on devnet, isolated from the rest of the launch flow:
+minted a coin, confirmed via `getSignaturesForAddress` that exactly one
+transaction touched the new mint account (previously three), confirmed the
+minted supply and ATA balance both match exactly, ~4s end-to-end.
+
+Economically this saves almost nothing (two fewer ~5,000-lamport base fees
+— noise next to the ~0.1686 SOL a pool costs) — the value is one fewer
+round trip and one less place for a partial failure to happen, not cost.
+`MEASURED_MINT_LAMPORTS` in the fee formula wasn't touched; the saving is
+too small to matter against its 15% margin.

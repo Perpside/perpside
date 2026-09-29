@@ -16,7 +16,7 @@ export default defineRailway(() => {
     replicas: { "sfo": 1 },
     volumeMounts: { "/data": perpsideVolume },
     env: { CLUSTER: preserve(), DB_PATH: preserve(), RPC_URL: preserve(), PLATFORM_WALLET_SECRET: preserve() },
-    deploy: { startCommand: "node --experimental-sqlite onchain/server/reward-cron.mjs", cronSchedule: "0 */2 * * *" },
+    deploy: { startCommand: "node --experimental-sqlite onchain/server/reward-cron.mjs", cronSchedule: "0 */2 * * *", restartPolicyType: "NEVER" },
   });
 
   return project("perpside", {

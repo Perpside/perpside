@@ -233,6 +233,7 @@ export function getLaunchConfig() {
   return {
     targetFdvUsd: DEFAULT_TARGET_FDV_USD,
     totalSupplyWhole: Number(TOTAL_SUPPLY_WHOLE),
+    coinDecimals: COIN_DECIMALS,
     maxFirstBuySupplyFraction: FIRST_BUY_MAX_SUPPLY_FRACTION,
     // The reward model's total fee is a choice among these, not a free
     // slider — anything else can't map onto a real pool (see solana.mjs

@@ -121,6 +121,15 @@ const poolColumns = db.prepare("PRAGMA table_info(token_pools)").all().map((c) =
 if (!poolColumns.includes('lock_nft_mint')) {
   db.exec('ALTER TABLE token_pools ADD COLUMN lock_nft_mint TEXT');
 }
+const rewardPayoutColumns = db.prepare("PRAGMA table_info(reward_payouts)").all().map((c) => c.name);
+if (!rewardPayoutColumns.includes('secondary_amount')) {
+  // Only meaningful for kind='buyback': `amount` is the backing-asset amount
+  // that went *into* the swap (needed to resume a stuck buyback with the
+  // exact original amount, see rewards.mjs); this is the COIN amount that
+  // came *out* and actually got burned — what the token page's "burned"
+  // stat needs.
+  db.exec('ALTER TABLE reward_payouts ADD COLUMN secondary_amount TEXT');
+}
 
 export function insertToken({
   mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status,
@@ -264,4 +273,39 @@ export function markRewardPayoutSent(id, txId) {
 
 export function markRewardPayoutFailed(id, errorMessage) {
   db.prepare("UPDATE reward_payouts SET status = 'failed', error_message = ? WHERE id = ?").run(errorMessage ?? null, id);
+}
+
+export function markRewardBuybackSent(id, txId, burnedCoinAmount) {
+  db.prepare("UPDATE reward_payouts SET status = 'sent', tx_id = ?, secondary_amount = ? WHERE id = ?")
+    .run(txId, String(burnedCoinAmount), id);
+}
+
+// Real (successfully sent) totals for a token's page — grouped by kind and,
+// for community/creator, by backing asset (each pool pays out in its own
+// asset, never a common one, see rewards.mjs). Summed in JS with BigInt
+// rather than SQL SUM: atomic token amounts can exceed the ~2^53 range
+// SQLite's SUM silently loses precision above.
+export function getTokenRewardTotals(mintAddress) {
+  const rows = db.prepare(`
+    SELECT rp.kind, rp.amount, rp.secondary_amount, rrp.backing_asset
+    FROM reward_payouts rp
+    JOIN reward_run_pools rrp ON rp.run_pool_id = rrp.id
+    JOIN reward_runs rr ON rrp.run_id = rr.id
+    WHERE rr.mint_address = ? AND rp.status = 'sent'
+  `).all(mintAddress);
+
+  const community = {}; // { XSOL: '123', XBTC: '456', ... }
+  const creator = {};
+  let burnedCoin = 0n;
+
+  for (const row of rows) {
+    if (row.kind === 'community') {
+      community[row.backing_asset] = ((BigInt(community[row.backing_asset] || '0')) + BigInt(row.amount)).toString();
+    } else if (row.kind === 'creator') {
+      creator[row.backing_asset] = ((BigInt(creator[row.backing_asset] || '0')) + BigInt(row.amount)).toString();
+    } else if (row.kind === 'buyback' && row.secondary_amount != null) {
+      burnedCoin += BigInt(row.secondary_amount);
+    }
+  }
+  return { community, creator, burnedCoin: burnedCoin.toString() };
 }

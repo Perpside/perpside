@@ -23,6 +23,7 @@ import {
   insertRewardPayout,
   getRewardPayouts,
   markRewardPayoutSent,
+  markRewardBuybackSent,
 } from './db.mjs';
 
 // A token's *combined* pending fees (summed in USD across all its pools)
@@ -191,7 +192,7 @@ async function executeBuyback({ runPoolId, poolAddress, coinMint, backingAssetMi
 
   const swapResult = await swapPlatformAssetForCoin({ poolId: poolAddress, coinMint, assetMint: backingAssetMint, amountIn: new BN(payout.amount) });
   const burnResult = await burnCoin(coinMint, swapResult.coinAmountOut);
-  markRewardPayoutSent(payout.id, `${swapResult.txId},${burnResult.txId}`);
+  markRewardBuybackSent(payout.id, `${swapResult.txId},${burnResult.txId}`, swapResult.coinAmountOut);
 }
 
 async function processPool(run, token, pool) {

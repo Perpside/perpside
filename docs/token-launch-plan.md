@@ -1089,3 +1089,51 @@ Railway's IaC tool (`.railway/railway.ts`) confirmed this is a clean,
 scoped change — `railway config plan` showed exactly two fields changing
 on the new service (`deploy.cronSchedule`, `deploy.startCommand`, and the
 volume attachment) and *zero* changes to the live `perpside` service.
+Applying it did surface one more thing worth a re-plan before trusting it
+blindly: Railway auto-sets `restartPolicyType: NEVER` on a cron service
+(correct — a cron job should run once and exit, not be restarted forever
+like a normal service), but that field wasn't declared in the authoring
+file, so the *next* plan proposed reverting it back to unset. Pinned it
+explicitly in `railway.ts` rather than applying that drift.
+
+## Token detail page: replaces the Explore-card → Jupiter redirect (2026-09-29)
+
+Clicking a coin in Explore used to `window.open` straight to
+`jup.ag/tokens/<mint>` — no way to see a coin's own info without leaving
+the app. Now it opens an in-app page (`showTokenDetail(mint)`, a new
+`page-token` `.page` section, same show/hide/back-button pattern as
+Launch and How It Works) with the coin's image/name/ticker, copyable mint
+address and creator wallet, social links, its backing assets, its
+configured reward model, and — the actual point of this — real
+tokenomics: how much has actually been distributed to the community, sent
+to the creator, and burned, not just what's configured. A prominent
+`Trade` button (styled like the site's own primary CTA, `.sign-in`) is
+still the only way to actually swap — it opens Jupiter, same as before,
+just no longer the *only* thing a click does.
+
+**Where the tokenomics numbers come from.** New `GET /api/tokens/:mint`
+field `rewardTotals` (`db.mjs` `getTokenRewardTotals`), summing every
+*successfully sent* (`status = 'sent'`) row in `reward_payouts` — pending,
+skipped-dust, and failed payouts don't count, since they didn't actually
+happen. Community and creator totals are kept separate per backing asset
+(a coin with 3 pools can have paid out in 3 different currencies — see
+the reward cron's own "native, not swapped" design) rather than merged
+into one number. Burned amount needed a schema addition: the existing
+buyback payout only ever recorded the *backing-asset* amount that went
+into the swap (needed to resume a stuck buyback with the exact original
+input), never the *COIN* amount that came back out and actually got
+burned. Added `reward_payouts.secondary_amount`, populated only for
+buyback rows via a new `markRewardBuybackSent`, so "how much has been
+burned" has a real number to read instead of only being visible by
+decoding the burn transaction by hand.
+
+Verified in a real browser (Playwright, local dev server, a token seeded
+with real `reward_payouts` rows across all three kinds): page renders
+correctly from Explore, back button returns to Explore, copy-to-clipboard
+works on both addresses, reward-model and tokenomics figures match the
+seeded DB rows exactly, mobile layout (390px) stacks cleanly with a
+full-width Trade button. Caught and fixed one real bug from this pass —
+number formatting used `toLocaleString(undefined, ...)`, which renders
+with a comma decimal separator under some browser locales; forced
+`'en-US'` explicitly so it's consistent with the rest of the site
+regardless of a visitor's locale.

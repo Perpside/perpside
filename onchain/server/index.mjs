@@ -14,7 +14,7 @@ import {
   broadcastFirstBuyHop2,
   LaunchValidationError,
 } from './launch.mjs';
-import { listTokens, getToken } from './db.mjs';
+import { listTokens, getToken, getTokenRewardTotals } from './db.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..', '..');
@@ -48,7 +48,10 @@ app.get('/api/tokens', (req, res) => {
 app.get('/api/tokens/:mint', (req, res) => {
   const token = getToken(req.params.mint);
   if (!token) return res.status(404).json({ error: 'not found' });
-  res.json(token);
+  // Only 'sent' (actually landed) reward payouts count — see db.mjs
+  // getTokenRewardTotals. Cheap enough to compute on every request; there's
+  // no meaningful traffic volume yet to justify caching it.
+  res.json({ ...token, rewardTotals: getTokenRewardTotals(req.params.mint) });
 });
 
 // Shared response handling for every /api/launch* route: LaunchValidationError

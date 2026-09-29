@@ -729,6 +729,170 @@
     height: 16px;
   }
 
+  .token-detail {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  .token-detail__loading {
+    text-align: center;
+    padding: 3rem 0;
+    color: var(--color-ink-muted);
+    font-size: 0.875rem;
+  }
+
+  .token-detail__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .token-detail__image {
+    width: 84px;
+    height: 84px;
+    border-radius: 20px;
+    object-fit: cover;
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    flex-shrink: 0;
+  }
+
+  .token-detail__heading {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .token-detail__name-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+  }
+
+  .token-detail__name {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-ink);
+  }
+
+  .token-detail__ticker {
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--color-ink-muted);
+  }
+
+  .token-detail__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin-top: 0.6rem;
+  }
+
+  .token-detail__meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    transition: border-color 150ms ease, color 150ms ease;
+  }
+
+  .token-detail__meta-item:hover {
+    border-color: var(--color-ink-muted);
+    color: var(--color-ink);
+  }
+
+  .token-detail__meta-item svg {
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+  }
+
+  .token-detail__socials {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.75rem;
+  }
+
+  .token-detail__socials .explore-card__social {
+    position: static;
+    width: 26px;
+    height: 26px;
+    color: var(--color-ink-muted);
+  }
+
+  .token-detail__socials .explore-card__social:hover {
+    color: var(--color-ink);
+  }
+
+  .token-detail__trade {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .token-detail__card {
+    padding: 1.5rem;
+    background: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: 18px;
+    margin-bottom: 1.25rem;
+  }
+
+  .token-detail__card-title {
+    margin: 0 0 1rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-ink);
+  }
+
+  .token-detail__assets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .token-detail__assets .launch-asset {
+    cursor: default;
+  }
+
+  .token-detail__empty {
+    font-size: 0.8125rem;
+    color: var(--color-ink-muted);
+  }
+
+  .token-detail__burn-total {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  @media (max-width: 560px) {
+    .token-detail__header {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .token-detail__trade {
+      width: 100%;
+    }
+
+    .token-detail__trade .sign-in {
+      width: 100%;
+      justify-content: center;
+    }
+  }
+
   .how-beta-banner {
     display: flex;
     align-items: center;
@@ -2261,6 +2425,17 @@
         </div>
       </section>
 
+      <section class="page" id="page-token" hidden>
+        <button type="button" class="launch-back" id="tokenBackBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+          Back
+        </button>
+
+        <div class="token-detail" id="tokenDetail">
+          <p class="token-detail__loading" id="tokenDetailLoading">Loading…</p>
+        </div>
+      </section>
+
     </div>
   </main>
 
@@ -2685,15 +2860,240 @@
           return;
         }
         var card = e.target.closest('.explore-card');
-        if (card) {
-          var url = card.dataset.mint ? 'https://jup.ag/tokens/' + card.dataset.mint : 'https://jup.ag';
-          window.open(url, '_blank', 'noopener,noreferrer');
+        if (card && card.dataset.mint && window.showTokenDetail) {
+          window.showTokenDetail(card.dataset.mint);
         }
       });
 
       window.renderExploreGrid = function () { return fetchTokens().then(render); };
       window.renderTokenCard = renderCard;
       fetchTokens().then(render);
+    })();
+
+    (function () {
+      var container = document.getElementById('tokenDetail');
+      if (!container) return;
+
+      var LAUNCH_API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
+
+      var assetIconMap = {
+        XSOL: 'assets/xsol.png',
+        XBTC: 'assets/xbtc.png',
+        XHYPE: 'assets/xhype.png'
+      };
+
+      function escapeHtml(str) {
+        return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function escapeAttr(str) {
+        return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      }
+
+      function normalizeSocialUrl(value, kind) {
+        var v = value.trim();
+        if (kind === 'x') {
+          v = v.replace(/^@/, '');
+          return /^https?:\/\//i.test(v) ? v : 'https://x.com/' + v;
+        }
+        if (kind === 'telegram') {
+          v = v.replace(/^@/, '');
+          if (/^https?:\/\//i.test(v)) return v;
+          if (/^t\.me\//i.test(v)) return 'https://' + v;
+          return 'https://t.me/' + v;
+        }
+        return /^https?:\/\//i.test(v) ? v : 'https://' + v;
+      }
+
+      function socialIconsHtml(t) {
+        var icons = '';
+        if (t.website_link) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(t.website_link, 'website')) + '" target="_blank" rel="noopener noreferrer" aria-label="Website">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+            '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a13.5 13.5 0 0 1 0 18M12 3a13.5 13.5 0 0 0 0 18"/></svg></a>';
+        }
+        if (t.x_link) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(t.x_link, 'x')) + '" target="_blank" rel="noopener noreferrer" aria-label="X">' +
+            '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>';
+        }
+        if (t.telegram_link) {
+          icons += '<a class="explore-card__social" href="' + escapeAttr(normalizeSocialUrl(t.telegram_link, 'telegram')) + '" target="_blank" rel="noopener noreferrer" aria-label="Telegram">' +
+            '<svg viewBox="0 0 448 512" fill="currentColor"><path d="M446.7 98.6l-67.6 318.8c-5.1 22.5-18.4 28.1-37.3 17.5l-103-75.9-49.7 47.8c-5.5 5.5-10.1 10.1-20.7 10.1l7.4-104.9 190.9-172.5c8.3-7.4-1.8-11.5-12.9-4.1L117.8 284 16.2 252.2c-22.1-6.9-22.5-22.1 4.6-32.7L418.2 66.4c18.4-6.9 34.5 4.1 28.5 32.2z"/></svg></a>';
+        }
+        return icons ? '<div class="token-detail__socials">' + icons + '</div>' : '';
+      }
+
+      function shortAddr(addr) {
+        if (!addr) return '';
+        return addr.slice(0, 4) + '…' + addr.slice(-4);
+      }
+
+      function copyIconSvg() {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
+      }
+
+      // Small amounts (e.g. a coin's own atomic units, 6+ decimals) round to
+      // nothing under toLocaleString's default precision — exponential
+      // notation for anything smaller than a hundredth keeps a genuinely
+      // tiny distributed amount from just displaying as "0".
+      function fmtAmount(atomicStr, decimals) {
+        var n = Number(atomicStr) / Math.pow(10, decimals);
+        if (!n || !isFinite(n)) return '0';
+        if (n < 0.01) return n.toExponential(2);
+        if (n >= 1000) return n.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        return n.toLocaleString('en-US', { maximumFractionDigits: 4 });
+      }
+
+      var backingAssetsCache = null;
+      function fetchBackingAssets() {
+        if (backingAssetsCache) return Promise.resolve(backingAssetsCache);
+        return fetch(LAUNCH_API_URL + '/api/backing-assets').then(function (r) { return r.json(); }).then(function (d) {
+          backingAssetsCache = d;
+          return d;
+        }).catch(function () { return {}; });
+      }
+
+      var launchConfigCache = null;
+      function fetchLaunchConfig() {
+        if (launchConfigCache) return Promise.resolve(launchConfigCache);
+        return fetch(LAUNCH_API_URL + '/api/launch-config').then(function (r) { return r.json(); }).then(function (d) {
+          launchConfigCache = d;
+          return d;
+        }).catch(function () { return null; });
+      }
+
+      function rewardModelRows(token) {
+        var community = token.community_fee || 0;
+        var creator = token.creator_fee || 0;
+        var buyback = token.buyback_fee || 0;
+        if (!community && !creator && !buyback) {
+          return '<p class="token-detail__empty">This coin wasn\'t launched with a reward model.</p>';
+        }
+        var rows = '';
+        if (community) rows += '<div class="reward-row"><span class="reward-row__label">Community reward</span><span class="reward-row__value">' + community + '% of volume</span></div>';
+        if (creator) rows += '<div class="reward-row"><span class="reward-row__label">Creator reward</span><span class="reward-row__value">' + creator + '% of volume</span></div>';
+        if (buyback) rows += '<div class="reward-row"><span class="reward-row__label">Buyback &amp; Burn</span><span class="reward-row__value">' + buyback + '% of volume</span></div>';
+        return rows;
+      }
+
+      // Empty string (not a placeholder card) when no reward model is
+      // configured at all — render() skips the whole "Tokenomics" card in
+      // that case rather than showing an empty one.
+      function tokenomicsHtml(token, backingAssets, launchConfig) {
+        var community = token.community_fee || 0;
+        var creator = token.creator_fee || 0;
+        var buyback = token.buyback_fee || 0;
+        if (!community && !creator && !buyback) return '';
+
+        var totals = token.rewardTotals || { community: {}, creator: {}, burnedCoin: '0' };
+        var rows = '';
+
+        function assetRows(label, byAsset) {
+          var keys = Object.keys(byAsset || {});
+          if (!keys.length) {
+            return '<div class="reward-row"><span class="reward-row__label">' + label + '</span><span class="reward-row__value">Not yet</span></div>';
+          }
+          return keys.map(function (asset) {
+            var decimals = (backingAssets[asset] && backingAssets[asset].decimals) || 6;
+            return '<div class="reward-row"><span class="reward-row__label">' + label + '</span><span class="reward-row__value">' + fmtAmount(byAsset[asset], decimals) + ' ' + escapeHtml(asset) + '</span></div>';
+          }).join('');
+        }
+
+        if (community) rows += assetRows('Distributed to community', totals.community);
+        if (creator) rows += assetRows('Sent to creator', totals.creator);
+        if (buyback) {
+          var burned = totals.burnedCoin || '0';
+          var coinDecimals = (launchConfig && launchConfig.coinDecimals) || 6;
+          var totalSupply = (launchConfig && launchConfig.totalSupplyWhole) || 1;
+          var burnedWhole = Number(burned) / Math.pow(10, coinDecimals);
+          var pct = totalSupply ? (burnedWhole / totalSupply * 100) : 0;
+          var pctLabel = pct > 0 && pct < 0.01 ? '<0.01' : pct.toFixed(2);
+          rows += '<div class="reward-row token-detail__burn-total"><span class="reward-row__label">Burned</span><span class="reward-row__value">' +
+            fmtAmount(burned, coinDecimals) + ' ' + escapeHtml(token.ticker) + ' (' + pctLabel + '% of supply)</span></div>';
+        }
+        return rows;
+      }
+
+      function render(token, backingAssets, launchConfig) {
+        var mint = token.mint_address;
+        var pools = token.pools || [];
+        var imageHtml = token.image_url
+          ? '<img class="token-detail__image" src="' + escapeAttr(token.image_url) + '" alt="">'
+          : '<div class="token-detail__image"></div>';
+
+        var assetsHtml = pools.length
+          ? '<div class="token-detail__assets">' + pools.map(function (p) {
+              var icon = assetIconMap[p.backing_asset];
+              return '<span class="launch-asset">' + (icon ? '<img src="' + escapeAttr(icon) + '" alt="">' : '') + escapeHtml(p.backing_asset) + '</span>';
+            }).join('') + '</div>'
+          : '<p class="token-detail__empty">No backing assets on record.</p>';
+
+        var tokenomics = tokenomicsHtml(token, backingAssets, launchConfig);
+
+        container.innerHTML =
+          '<div class="token-detail__header">' +
+            imageHtml +
+            '<div class="token-detail__heading">' +
+              '<div class="token-detail__name-row">' +
+                '<h1 class="token-detail__name">' + escapeHtml(token.name) + '</h1>' +
+                '<span class="token-detail__ticker">' + escapeHtml(token.ticker) + '</span>' +
+              '</div>' +
+              '<div class="token-detail__meta">' +
+                '<button type="button" class="token-detail__meta-item" data-copy="' + escapeAttr(mint) + '" title="Copy mint address">' + copyIconSvg() + shortAddr(mint) + '</button>' +
+                (token.creator_wallet ? '<button type="button" class="token-detail__meta-item" data-copy="' + escapeAttr(token.creator_wallet) + '" title="Copy creator wallet">' + copyIconSvg() + 'Creator ' + shortAddr(token.creator_wallet) + '</button>' : '') +
+              '</div>' +
+              socialIconsHtml(token) +
+            '</div>' +
+            '<div class="token-detail__trade">' +
+              '<a class="sign-in" href="https://jup.ag/tokens/' + encodeURIComponent(mint) + '" target="_blank" rel="noopener noreferrer">' +
+                '<span class="sign-in__fill"></span><span class="sign-in__label">Trade</span>' +
+              '</a>' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="token-detail__card">' +
+            '<p class="token-detail__card-title">Backing assets</p>' +
+            assetsHtml +
+          '</div>' +
+
+          '<div class="token-detail__card">' +
+            '<p class="token-detail__card-title">Reward model</p>' +
+            rewardModelRows(token) +
+          '</div>' +
+
+          (tokenomics ? '<div class="token-detail__card"><p class="token-detail__card-title">Tokenomics</p>' + tokenomics + '</div>' : '');
+
+        Array.prototype.slice.call(container.querySelectorAll('[data-copy]')).forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var value = btn.getAttribute('data-copy');
+            if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+            navigator.clipboard.writeText(value).then(function () {
+              var original = btn.innerHTML;
+              btn.textContent = 'Copied';
+              setTimeout(function () { btn.innerHTML = original; }, 1200);
+            });
+          });
+        });
+      }
+
+      window.showTokenDetail = function (mint) {
+        if (!mint) return;
+        if (window.showAppPage) window.showAppPage('token');
+        container.innerHTML = '<p class="token-detail__loading">Loading…</p>';
+
+        Promise.all([
+          fetch(LAUNCH_API_URL + '/api/tokens/' + encodeURIComponent(mint)).then(function (r) {
+            if (!r.ok) throw new Error('not found');
+            return r.json();
+          }),
+          fetchBackingAssets(),
+          fetchLaunchConfig()
+        ]).then(function (results) {
+          render(results[0], results[1] || {}, results[2]);
+        }).catch(function () {
+          container.innerHTML = '<p class="token-detail__empty">Couldn\'t load this coin — it may no longer exist.</p>';
+        });
+      };
     })();
 
     (function () {
@@ -3782,6 +4182,11 @@
       var howBackBtn = document.getElementById('howBackBtn');
       if (howBackBtn) {
         howBackBtn.addEventListener('click', goBackFrom);
+      }
+
+      var tokenBackBtn = document.getElementById('tokenBackBtn');
+      if (tokenBackBtn) {
+        tokenBackBtn.addEventListener('click', goBackFrom);
       }
 
       var howItWorksAppLink = document.getElementById('howItWorksAppLink');

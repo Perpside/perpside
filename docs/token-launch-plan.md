@@ -904,3 +904,57 @@ sliders to 33/34 lands exactly on a 100 sum, switching the fee tier
 updates every "% of volume" label live, and disabling a destination
 correctly re-splits the remaining 100% across what's left on — screenshot
 confirmed the layout renders cleanly with no console errors.
+
+## Fixed: COIN-as-mintB pools weren't actually single-sided (2026-09-29)
+
+Spotted while checking a user report about pool pair naming ("COIN-xHYPE"
+vs "xBTC-COIN" on Raydium's own UI for the same launched coin) — that part
+turned out to be expected: Raydium/Uniswap-v3-fork pools always order the
+two mints as whichever sorts lower by raw pubkey bytes (`isCoinMintA` in
+calibration.mjs), and since COIN's mint is a fresh random keypair every
+launch while each backing asset's mint is fixed, which one lands as mintA
+vs mintB — and therefore which one a UI lists first — flips per pair. Not
+a bug, and not fixable (Solana/Raydium enforce mint0 < mint1 canonically).
+
+Digging into it to be sure turned up a real, separate bug: `initial_price`
+for a live launch's three pools showed two tiny fractional numbers (XBTC,
+XSOL — coin priced in asset terms) and one wildly different large number
+(XHYPE, 5,001,401) — not a display bug, but a sign the *positions*
+themselves weren't symmetric. Decoded all three pools on-chain directly:
+the two "small number" pools correctly showed `liquidity: 0` at their
+starting tick (fully single-sided COIN, price sitting just outside the
+position's range, as intended) — but the XHYPE pool showed non-zero
+active liquidity, meaning its position was already technically in-range
+at creation and holding a sliver of XHYPE alongside the COIN, not the
+intended 0%.
+
+**Root cause:** `createCustomizablePool` only accepts a decimal
+`initialPrice`, not a raw `sqrtPriceX64` — internally it re-derives its
+own `sqrtPriceX64` from that decimal, and the round-trip loses just
+enough precision to floor to one tick below whichever boundary tick
+`calibratePool` computed. Harmless when COIN=mintA (the position needs
+the price *below* its range, and rounding down only pushes it further
+outside — already correct). Wrong when COIN=mintB (the position needs the
+price *at or above* its range — landing one tick short puts it inside
+instead).
+
+**Fix:** `calibratePool` (calibration.mjs) no longer hands back the exact
+boundary-tick price and assumes it round-trips correctly. It now resolves
+the starting price by running the *same* decimal round-trip
+`createCustomizablePool` performs internally (`priceToSqrtPriceX64` →
+`getTickAtSqrtPrice`, both from the SDK's own `TickUtil` — the same tick
+math the on-chain program uses) and nudges outward by a tick, re-checking,
+until the result verifiably lands on the correct side of the boundary.
+Verified, not assumed — for either orientation.
+
+Verified twice: (1) reproduced the exact XHYPE scenario's numbers in
+isolation and confirmed the round-trip now resolves to tick ≥ tickUpper
+instead of one short; (2) minted real test coins on devnet until landing
+one that sorts as mintB against XHYPE (~50/50 per mint, matched on the
+3rd attempt), created a real pool through the fixed code, and decoded the
+resulting on-chain account: `tickCurrent = 154261` (≥ `tickUpper = 154260`)
+with `liquidity: 0` — genuinely single-sided this time, matching the
+already-correct COIN=mintA case. The earlier live example (whose XHYPE
+pool has the dust-liquidity issue) is a devnet demo token with no real
+funds at stake and wasn't recreated — the fix only affects pools created
+from here on.

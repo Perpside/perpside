@@ -67,10 +67,37 @@ export function calibratePool({
   // Pool's starting price must sit exactly on the edge the position touches,
   // so the position is single-sided from block zero: tickLower if COIN=A
   // (price starts at/below the range), tickUpper if COIN=B (price starts
-  // at/above the range).
+  // at/above the range). `createCustomizablePool` only takes a decimal
+  // price, not a raw sqrtPriceX64 — it re-derives its own sqrtPriceX64 from
+  // that decimal internally, and the round-trip loses just enough precision
+  // to floor to one tick below whichever boundary we pass in. Harmless for
+  // COIN=A (rounding down only pushes the start further outside the range,
+  // which is what single-sided-A already wants) but wrong for COIN=B (it
+  // needs the start to land *at or above* tickUpper, and landing one tick
+  // short puts it inside the range instead — a dust amount of the backing
+  // asset ends up live in the position instead of 0). Confirmed on real
+  // launched pools: COIN-as-mintB pools decoded with non-zero liquidity at
+  // tickCurrent = tickUpper - 1, while COIN-as-mintA pools correctly showed
+  // 0. Fixed by resolving against the exact same decimal round-trip
+  // `createCustomizablePool` performs (not assumed), nudging outward by a
+  // tick until it verifiably lands on the correct side.
+  function resolveBoundaryStartPrice(boundaryTick, wantTickAtLeast) {
+    let tick = boundaryTick;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const price = TickUtil.tickToPrice(tick, decA, decB);
+      const roundTrippedSqrtPrice = TickUtil.priceToSqrtPriceX64(price, decA, decB);
+      const resolvedTick = TickUtil.getTickAtSqrtPrice(roundTrippedSqrtPrice);
+      const onCorrectSide = wantTickAtLeast ? resolvedTick >= boundaryTick : resolvedTick < boundaryTick;
+      if (onCorrectSide) return price;
+      tick += wantTickAtLeast ? 1 : -1;
+    }
+    throw new Error('could not resolve a single-sided starting price for tick ' + boundaryTick);
+  }
+
   const base = coinIsMintA ? 'MintA' : 'MintB';
-  const startSqrtPriceX64 = coinIsMintA ? sqrtPriceLowerX64 : sqrtPriceUpperX64;
-  const startPrice = TickUtil.sqrtPriceX64ToPrice(startSqrtPriceX64, decA, decB);
+  const startPrice = coinIsMintA
+    ? resolveBoundaryStartPrice(tickLower, false)
+    : resolveBoundaryStartPrice(tickUpper, true);
 
   const liquidity = coinIsMintA
     ? LiquidityMathUtil.getLiquidityFromAmountA(sqrtPriceLowerX64, sqrtPriceUpperX64, coinShareAtomic)

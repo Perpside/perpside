@@ -3,12 +3,14 @@ import BN from 'bn.js';
 import {
   getConnection,
   getPlatformWallet,
-  getPoolPendingFees,
-  harvestPoolFees,
+  getCpmmPoolPendingFees,
+  harvestCpmmLockedFees,
   sendTokenBatch,
-  swapPlatformAssetForCoin,
+  swapPlatformCpmm,
   burnCoin,
   CLUSTER,
+  COIN_DECIMALS,
+  CPMM_POOL_AUTHORITY_FOR_CLUSTER,
 } from './solana.mjs';
 import { listBackingAssets } from './launch.mjs';
 import {
@@ -57,10 +59,10 @@ function backingAssetInfo(symbol) {
   return asset;
 }
 
-// Devnet's stand-in assets have no real market (same reasoning as
-// launch.mjs resolveAssetUsdPrice) — mainnet fetches a live price and
-// simply skips this token's check for the current cron tick on failure
-// (returns null) rather than throwing, since there's always a next tick.
+// Devnet's stand-in assets have no real market — mainnet fetches a live
+// price and simply skips this token's check for the current cron tick on
+// failure (returns null) rather than throwing, since there's always a next
+// tick.
 async function fetchAssetUsdPrice(asset) {
   if (CLUSTER !== 'mainnet-beta') return asset.usdPrice;
   try {
@@ -77,23 +79,46 @@ function atomicToWhole(amountAtomic, decimals) {
   return Number(amountAtomic.toString()) / 10 ** decimals;
 }
 
-// Sums a token's pending (unharvested) fees across all its pools, in USD —
-// cheap to check every cron tick since it reads on-chain state directly
-// (see solana.mjs getPoolPendingFees) rather than spending a transaction.
-// Returns null if any pool's price can't be resolved right now, so the
-// caller skips this token for the tick instead of triggering on a partial
-// total.
+// Sums a token's pending (unharvested) fees across all its final (CPMM)
+// pools, in USD — checked every cron tick before spending a transaction to
+// actually collect anything. Unlike the old CLMM version, this can't avoid
+// a network call (see solana.mjs getCpmmPoolPendingFees's own comment on
+// why) — any failure (the indexer being down, lagging, or a price lookup
+// failing) returns null so the caller skips this token for the tick rather
+// than triggering on a partial or stale total.
+//
+// CPMM fees accrue on *both* pool sides, unlike CLMM's single-mint-pinned
+// fee — the COIN side has no independent USD price feed of its own, so
+// it's valued via the pool's own real spot price (priceBPerA) converted
+// into the backing asset, then priced the same way the asset side already
+// is. This is the same conversion processPool actually performs via a real
+// swap once a harvest triggers (see swapPlatformCpmm below); this function
+// just estimates it without spending anything.
 async function computeTokenPendingFeesUsd(token) {
   let totalUsd = 0;
   for (const pool of token.pools) {
     const asset = backingAssetInfo(pool.backing_asset);
     const usdPrice = await fetchAssetUsdPrice(asset);
     if (usdPrice == null) return null;
-    const pendingAtomic = await getPoolPendingFees(
-      { poolAddress: pool.pool_address, positionNftMint: pool.position_nft_mint, tickLower: pool.tick_lower, tickUpper: pool.tick_upper },
-      token.mint_address
-    );
-    totalUsd += atomicToWhole(pendingAtomic, asset.decimals) * usdPrice;
+
+    let pending;
+    try {
+      pending = await getCpmmPoolPendingFees({ lockNftMint: pool.lock_nft_mint });
+    } catch {
+      return null;
+    }
+
+    const coinIsMintA = pending.mintA === token.mint_address;
+    const assetSideAtomic = coinIsMintA ? pending.amountBAtomic : pending.amountAAtomic;
+    const coinSideAtomic = coinIsMintA ? pending.amountAAtomic : pending.amountBAtomic;
+    // priceBPerA is "asset per COIN" when coinIsMintA (COIN=A, asset=B),
+    // and "COIN per asset" otherwise — invert in the second case so this
+    // is always "asset per COIN" before applying it below.
+    const assetPerCoin = coinIsMintA ? pending.priceBPerA : 1 / pending.priceBPerA;
+    const coinSideInAssetWhole = atomicToWhole(coinSideAtomic, COIN_DECIMALS) * assetPerCoin;
+
+    totalUsd += atomicToWhole(assetSideAtomic, asset.decimals) * usdPrice;
+    totalUsd += coinSideInAssetWhole * usdPrice;
   }
   return totalUsd;
 }
@@ -198,9 +223,9 @@ async function executeBuyback({ runPoolId, poolAddress, coinMint, backingAssetMi
   }
   if (payout.status !== 'pending') return;
 
-  const swapResult = await swapPlatformAssetForCoin({ poolId: poolAddress, coinMint, assetMint: backingAssetMint, amountIn: new BN(payout.amount) });
-  const burnResult = await burnCoin(coinMint, swapResult.coinAmountOut);
-  markRewardBuybackSent(payout.id, `${swapResult.txId},${burnResult.txId}`, swapResult.coinAmountOut);
+  const swapResult = await swapPlatformCpmm({ poolId: poolAddress, inputMint: backingAssetMint, outputMint: coinMint, amountInAtomic: new BN(payout.amount) });
+  const burnResult = await burnCoin(coinMint, swapResult.amountOutAtomic);
+  markRewardBuybackSent(payout.id, `${swapResult.txId},${burnResult.txId}`, swapResult.amountOutAtomic);
 }
 
 async function payPlatformRevenue({ runPoolId, backingAssetMint, amountAtomic }) {
@@ -228,15 +253,33 @@ async function processPool(run, token, pool) {
   // Whether the harvest already happened is tracked by harvested_amount
   // being set, not by the status string — a pool can be marked 'failed'
   // *after* a successful harvest (e.g. the distribute step failed), and
-  // retrying it must not harvest a second time.
+  // retrying it must not harvest a second time. A retry that re-enters this
+  // block after a real harvest already landed just harvests whatever
+  // (small) amount has accrued since — safe, not a double-spend, since
+  // harvestCpmmLockedFees only ever collects what's currently pending.
+  //
+  // CPMM harvests both pool sides at once (see harvestCpmmLockedFees's own
+  // comment) — the COIN side is immediately converted into the backing
+  // asset via a real swap through this same pool, so the *entire* harvest
+  // ends up in one currency before the existing (unmodified) reward-model
+  // split below ever runs. This is done here, inside the harvest phase, not
+  // the distribute phase below — if the conversion swap fails, retrying
+  // must not re-harvest, and folding it into this phase means
+  // harvested_amount is only ever persisted once both steps succeed.
   if (runPool.harvested_amount == null) {
     try {
-      const harvest = await harvestPoolFees(
-        { poolAddress: pool.pool_address, lockNftMint: pool.lock_nft_mint },
-        pool.backing_asset_mint
-      );
-      markRewardRunPoolHarvested(runPool.id, harvest.harvestedAtomic, harvest.txId);
-      runPool.harvested_amount = harvest.harvestedAtomic.toString();
+      const harvest = await harvestCpmmLockedFees({
+        poolId: pool.pool_address, lockNftMint: pool.lock_nft_mint, coinMint: token.mint_address, assetMint: pool.backing_asset_mint,
+      });
+      let totalAssetAtomic = harvest.assetHarvestedAtomic;
+      if (harvest.coinHarvestedAtomic.gtn(0)) {
+        const converted = await swapPlatformCpmm({
+          poolId: pool.pool_address, inputMint: token.mint_address, outputMint: pool.backing_asset_mint, amountInAtomic: harvest.coinHarvestedAtomic,
+        });
+        totalAssetAtomic = totalAssetAtomic.add(converted.amountOutAtomic);
+      }
+      markRewardRunPoolHarvested(runPool.id, totalAssetAtomic, harvest.txId);
+      runPool.harvested_amount = totalAssetAtomic.toString();
     } catch (err) {
       updateRewardRunPoolStatus(runPool.id, 'failed', err.message);
       return;
@@ -251,7 +294,12 @@ async function processPool(run, token, pool) {
     const remainderAtomic = harvestedAtomic.sub(platformFeeAtomic);
     const { communityAtomic, creatorAtomic, buybackAtomic } = splitByRewardModel(remainderAtomic, token);
     const usdPrice = (await fetchAssetUsdPrice(asset)) ?? 0;
-    const excludeOwners = [...token.pools.map((p) => p.pool_address), getPlatformWallet().publicKey.toBase58()];
+    // CPMM vaults are owned by one PDA shared across every pool on the
+    // program (see solana.mjs CPMM_POOL_AUTHORITY_FOR_CLUSTER's own
+    // comment), not by the pool's own address — excluding pool_address
+    // here would not actually exclude the pool's reserves from "real
+    // holders".
+    const excludeOwners = [CPMM_POOL_AUTHORITY_FOR_CLUSTER.toBase58(), getPlatformWallet().publicKey.toBase58()];
 
     await distributeCommunity({
       runPoolId: runPool.id, mintAddress: token.mint_address, backingAssetMint: pool.backing_asset_mint,

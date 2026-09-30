@@ -23,8 +23,6 @@ import {
   Raydium,
   DEVNET_PROGRAM_ID,
   CLMM_PROGRAM_ID,
-  CLMM_LOCK_PROGRAM_ID,
-  CLMM_LOCK_AUTH_ID,
   CREATE_CPMM_POOL_PROGRAM,
   CREATE_CPMM_POOL_FEE_ACC,
   LOCK_CPMM_PROGRAM,
@@ -32,15 +30,10 @@ import {
   TxVersion,
   getPdaExBitmapAccount,
   getPdaPersonalPositionAddress,
-  getPdaTickArrayAddress,
-  getPdaLockClPositionIdV2,
+  getCpLockPda,
+  getPdaPoolAuthority,
   PersonalPositionLayout,
   PoolInfoLayout,
-  CpmmPoolInfoLayout,
-  TickArrayLayout,
-  TickArrayUtil,
-  PositionUtils,
-  LockClPositionLayoutV2,
   TickArrayBitmapExtensionLayout,
   swapInternal,
 } from '@raydium-io/raydium-sdk-v2';
@@ -71,12 +64,18 @@ if (CLUSTER === 'mainnet-beta' && /devnet/i.test(RPC_URL)) {
 }
 
 export const CLMM_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_PROGRAM_ID;
-export const CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_PROGRAM_ID;
-export const CLMM_LOCK_AUTH_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_AUTH_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_AUTH_ID;
 export const CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CREATE_CPMM_POOL_PROGRAM : DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_PROGRAM;
 export const CREATE_CPMM_POOL_FEE_ACC_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CREATE_CPMM_POOL_FEE_ACC : DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_FEE_ACC;
 export const LOCK_CPMM_PROGRAM_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? LOCK_CPMM_PROGRAM : DEVNET_PROGRAM_ID.LOCK_CPMM_PROGRAM;
 export const LOCK_CPMM_AUTH_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? LOCK_CPMM_AUTH : DEVNET_PROGRAM_ID.LOCK_CPMM_AUTH;
+// The address every CPMM pool's vaults are owned by — one PDA shared across
+// every pool on the program (getPdaPoolAuthority only seeds on programId,
+// not poolId), not a per-pool address. The reward cron needs this to
+// exclude a pool's own reserves from "real holders" when splitting the
+// community pot (see rewards.mjs getRealHolders) — confirmed by reading
+// getPdaPoolAuthority's own seed list, not assumed from the CLMM pattern
+// (CLMM's per-pool vault ownership doesn't generalize here).
+export const CPMM_POOL_AUTHORITY_FOR_CLUSTER = getPdaPoolAuthority(CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER).publicKey;
 
 // Some RPC-client error messages embed the request URL, which carries our
 // API key in its query string — strip it before any such message can reach
@@ -768,97 +767,106 @@ export async function buildFirstBuyTx({ poolId, coinMint, assetMint, buyerWallet
   };
 }
 
-// Reads a locked position's *unharvested* fee amount directly from on-chain
-// state (pool + the two tick arrays bounding the position), without ever
-// calling harvestLockPosition — lets the reward cron check whether a
-// token's accrued fees have crossed the USD threshold before spending a
-// transaction to actually collect them. Verified against a real harvest on
-// devnet: the harvested amount landed exactly equal to what this function
-// predicted beforehand (see docs/token-launch-plan.md).
-export async function getPoolPendingFees({ poolAddress, positionNftMint, tickLower, tickUpper }, coinMint) {
-  const connection = getConnection();
-  const poolAccountInfo = await connection.getAccountInfo(new PublicKey(poolAddress));
-  // A stored pool/position address that doesn't resolve on the current
-  // RPC/CLUSTER almost always means this row was created under a
-  // *different* cluster than the one the backend is running against right
-  // now (e.g. a devnet launch left in the DB after CLUSTER flipped to
-  // mainnet-beta) — every PDA below is derived using
-  // CLMM_PROGRAM_ID_FOR_CLUSTER, so a cluster mismatch makes them resolve
-  // to addresses that were never created. Failing loudly here beats a bare
-  // "Cannot read properties of null" a few lines down.
-  if (!poolAccountInfo) {
-    throw new Error(`pool account not found for ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
+// CPMM's locked-LP fee accounting doesn't live in a plain RPC-decodable
+// account the way CLMM's tick-based position fees did — there's no exported
+// on-chain layout for the lock account in the SDK, and harvestLockLp takes
+// an explicit lpFeeAmount input rather than "harvest whatever's pending"
+// (see docs/token-launch-plan.md "Reward cron: CPMM"). Raydium's own hosted
+// indexer is the only source for this figure (it's what their own UI's
+// claim-fees button uses too), reached directly rather than through the
+// SDK's own raydium.api.fetchCpmmLockInfo — that helper mis-concatenates
+// the base API host in front of CPMM_LOCK's already-absolute URL, a real
+// bug confirmed by a raw request against it, not assumed. Empirically
+// confirmed on devnet: the indexer can lag a real swap's fee by tens of
+// seconds before it shows up — callers should tolerate a stale/zero read,
+// not treat it as "nothing pending yet" being final.
+async function fetchCpmmLockPosition(lockNftMint) {
+  const lockPda = getCpLockPda(LOCK_CPMM_PROGRAM_FOR_CLUSTER, new PublicKey(lockNftMint)).publicKey;
+  const base = CLUSTER === 'mainnet-beta' ? 'https://dynamic-ipfs.raydium.io' : 'https://dynamic-ipfs-devnet.raydium.io';
+  const res = await fetch(`${base}/lock/cpmm/position?id=${lockPda.toBase58()}`);
+  if (!res.ok) {
+    throw new Error(`CPMM lock position lookup failed for ${lockPda.toBase58()}: HTTP ${res.status}`);
   }
-  const poolState = PoolInfoLayout.decode(poolAccountInfo.data);
-
-  const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(positionNftMint)).publicKey;
-  const positionAccountInfo = await connection.getAccountInfo(positionPda);
-  if (!positionAccountInfo) {
-    throw new Error(`position account not found for ${positionPda.toBase58()} on ${CLUSTER} — likely a stale row from a different cluster`);
+  const body = await res.json();
+  if (!body?.positionInfo?.unclaimedFee || !body?.poolInfo) {
+    throw new Error(`CPMM lock position lookup for ${lockPda.toBase58()} returned no positionInfo/unclaimedFee`);
   }
-  const positionState = PersonalPositionLayout.decode(positionAccountInfo.data);
-
-  const startIndexLower = TickArrayUtil.getTickArrayStartIndex(tickLower, poolState.tickSpacing);
-  const startIndexUpper = TickArrayUtil.getTickArrayStartIndex(tickUpper, poolState.tickSpacing);
-  const tickArrayLowerPda = getPdaTickArrayAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(poolAddress), startIndexLower).publicKey;
-  const tickArrayUpperPda = getPdaTickArrayAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(poolAddress), startIndexUpper).publicKey;
-
-  const sameArray = tickArrayLowerPda.equals(tickArrayUpperPda);
-  const keys = sameArray ? [tickArrayLowerPda] : [tickArrayLowerPda, tickArrayUpperPda];
-  const infos = await connection.getMultipleAccountsInfo(keys);
-  if (infos.some((info) => !info)) {
-    throw new Error(`tick array account not found for pool ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
-  }
-  const lowerArray = TickArrayLayout.decode(infos[0].data);
-  const upperArray = sameArray ? lowerArray : TickArrayLayout.decode(infos[1].data);
-
-  const lowerOffset = TickArrayUtil.getTickOffsetInArray(tickLower, poolState.tickSpacing);
-  const upperOffset = TickArrayUtil.getTickOffsetInArray(tickUpper, poolState.tickSpacing);
-  const tickLowerData = lowerArray.ticks[lowerOffset];
-  const tickUpperData = upperArray.ticks[upperOffset];
-
-  const { tokenFeeAmountA, tokenFeeAmountB } = PositionUtils.GetPositionFees(poolState, positionState, tickLowerData, tickUpperData);
-
-  // feeOn pins collection to the backing asset (the old model's pools were
-  // created with collectFeeOnMint set to it), so the COIN side should read
-  // ~0 regardless — read both and pick
-  // whichever side actually matches the backing asset's mint rather than
-  // assuming, so this stays correct if that ever changes.
-  const coinIsA = poolState.mintA.toBase58() === coinMint;
-  return coinIsA ? tokenFeeAmountB : tokenFeeAmountA;
+  return body;
 }
 
-// Collects a locked position's accrued fees into the platform's own ATA for
-// the backing asset — the platform is both the lock owner and the fee
-// payer, so this needs no creator/user signature. Returns the exact
-// harvested amount by diffing the platform's ATA balance around the call,
-// rather than trusting a return value the SDK doesn't expose directly.
-export async function harvestPoolFees({ poolAddress, lockNftMint }, backingAssetMint) {
-  const connection = getConnection();
+// Pending (unharvested) fee estimate for a locked CPMM position, in atomic
+// units of both pool sides — lets the reward cron check whether a token's
+// accrued fees have crossed the USD threshold before spending a real
+// transaction to collect them, same purpose the old CLMM getPoolPendingFees
+// served. Unlike that one, this can't avoid the network round trip to
+// Raydium's indexer (see fetchCpmmLockPosition) — there's no cheaper
+// on-chain-only path for CPMM's locked-LP fee accounting.
+export async function getCpmmPoolPendingFees({ lockNftMint }) {
+  const info = await fetchCpmmLockPosition(lockNftMint);
+  const { mintA, mintB, lpMint } = info.poolInfo;
+  return {
+    mintA: mintA.address,
+    mintB: mintB.address,
+    // "B per A" — same convention as poolPrice everywhere else in this file.
+    priceBPerA: info.poolInfo.price,
+    lpFeeAmount: new BN(Math.round(info.positionInfo.unclaimedFee.lp * 10 ** lpMint.decimals)),
+    amountAAtomic: new BN(Math.round(info.positionInfo.unclaimedFee.amountA * 10 ** mintA.decimals)),
+    amountBAtomic: new BN(Math.round(info.positionInfo.unclaimedFee.amountB * 10 ** mintB.decimals)),
+  };
+}
+
+// Collects a locked CPMM position's accrued LP trading fees into the
+// platform's own ATAs for both pool sides (CPMM fees accrue proportionally
+// across both tokens, unlike CLMM's single-mint-pinned collectFeeOnMint —
+// see docs/token-launch-plan.md "Reward cron: CPMM"). Re-reads pending fees
+// itself right before harvesting rather than trusting an earlier read (the
+// two calls may be minutes apart in the cron flow, and the indexer's own
+// number can still be moving). Returns exact harvested amounts by diffing
+// the platform's real balances around the call, same pattern as every other
+// harvest/close function in this file.
+export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, assetMint }) {
   const payer = getPlatformWallet();
   const raydium = await getRaydium();
 
-  const lockDataPda = getPdaLockClPositionIdV2(CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER, new PublicKey(lockNftMint)).publicKey;
-  const lockAccountInfo = await connection.getAccountInfo(lockDataPda);
-  if (!lockAccountInfo) {
-    throw new Error(`lock account not found for ${lockDataPda.toBase58()} on ${CLUSTER} — likely a stale row from a different cluster`);
+  const pending = await getCpmmPoolPendingFees({ lockNftMint });
+  if (pending.lpFeeAmount.isZero()) {
+    throw new Error(`no pending CPMM fee to harvest for lock ${lockNftMint} — check before calling`);
   }
-  const lockData = LockClPositionLayoutV2.decode(lockAccountInfo.data);
 
-  const assetAta = await getAssociatedTokenAddress(new PublicKey(backingAssetMint), payer.publicKey);
-  const balanceBefore = await getTokenBalance(payer.publicKey.toBase58(), backingAssetMint);
+  const { poolInfo, poolKeys } = await raydium.cpmm.getPoolInfoFromRpc(poolId);
+  const coinBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
+  const assetBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), assetMint);
 
-  const { execute } = await raydium.clmm.harvestLockPosition({
-    programId: CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER,
-    authProgramId: CLMM_LOCK_AUTH_ID_FOR_CLUSTER,
-    clmmProgram: CLMM_PROGRAM_ID_FOR_CLUSTER,
-    lockData,
+  const { execute } = await raydium.cpmm.harvestLockLp({
+    poolInfo,
+    poolKeys,
+    nftMint: new PublicKey(lockNftMint),
+    lpFeeAmount: pending.lpFeeAmount,
+    // Without programId/authProgram, harvestLockLp defaults to its own
+    // top-level mainnet LOCK_CPMM_PROGRAM/LOCK_CPMM_AUTH constants
+    // regardless of CLUSTER — caught for real on devnet as a raw
+    // "InvalidProgramForExecution" runtime error (not even a proper Error
+    // instance, just a string with a txId attached). Without cpmmProgram,
+    // it separately defaults the *pool's own* program/authority to their
+    // mainnet constants too — caught for real as a second, distinct
+    // failure (AnchorError InvalidProgramId, "Program ID was not as
+    // expected", read straight from the failed tx's on-chain logs) even
+    // after the first fix. Neither default is documented; both were found
+    // by reading the SDK's own instruction-building code, not assumed.
+    programId: LOCK_CPMM_PROGRAM_FOR_CLUSTER,
+    authProgram: LOCK_CPMM_AUTH_FOR_CLUSTER,
+    cpmmProgram: { programId: CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER, authProgram: CPMM_POOL_AUTHORITY_FOR_CLUSTER },
     txVersion: TxVersion.V0,
   });
   const result = await execute({ sendAndConfirm: true });
 
-  const balanceAfter = await getTokenBalance(payer.publicKey.toBase58(), backingAssetMint);
-  return { txId: result?.txId ?? String(result), harvestedAtomic: balanceAfter.sub(balanceBefore) };
+  const coinBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
+  const assetBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), assetMint);
+  return {
+    txId: result?.txId ?? String(result),
+    coinHarvestedAtomic: coinBalanceAfter.sub(coinBalanceBefore),
+    assetHarvestedAtomic: assetBalanceAfter.sub(assetBalanceBefore),
+  };
 }
 
 // Sends `amountAtomic` of `mint` to each recipient from the platform's own
@@ -892,62 +900,37 @@ export async function sendTokenBatch(mint, recipients) {
   return results;
 }
 
-// Platform-signed swap of its own backing-asset holdings into COIN — used
-// only for the automated Buyback & Burn step (never creator- or
-// user-signed, unlike buildFirstBuyTx). Same simulate-then-swap pattern as
-// First Buy's hop 2, but self-signed and sent immediately rather than
-// handed back unsigned. Returns the exact COIN amount received.
-export async function swapPlatformAssetForCoin({ poolId, coinMint, assetMint, amountIn }) {
-  const connection = getConnection();
-  const payer = getPlatformWallet();
+// Platform-signed swap through one of a token's own final CPMM pools —
+// generic over direction (used both ways by the reward cron: backing-asset
+// -> COIN for Buyback & Burn, and COIN -> backing-asset to convert a CPMM
+// harvest's COIN-side fee into the same currency as its asset-side fee
+// before the reward-model split runs — see rewards.mjs). Never creator- or
+// user-signed, unlike buildFirstBuyTx; sent immediately rather than handed
+// back unsigned. Returns the exact output amount received.
+export async function swapPlatformCpmm({ poolId, inputMint, outputMint, amountInAtomic }) {
   const raydium = await getRaydium();
+  const { poolInfo, poolKeys, computePoolInfo } = await raydium.cpmm.getPoolInfoFromRpc(poolId);
 
-  // Selling the backing asset for COIN — identical operation to First Buy's
-  // hop 2 (buildFirstBuyTx above), so the same zeroForOne rule applies:
-  // true when COIN is mintB (we're spending mintA), false when COIN is
-  // mintA (we're spending mintB).
-  const coinIsMintA = isCoinMintA(coinMint, assetMint);
-  const zeroForOne = !coinIsMintA;
-
-  const { poolInfo, rpcData, configInfo, tickArrays } = await raydium.clmm.getSwapPoolInfo(poolId, zeroForOne);
-  const programId = new PublicKey(poolInfo.programId);
-  const poolIdPub = new PublicKey(poolInfo.id);
-
-  const bitmapExtensionAddr = getPdaExBitmapAccount(programId, poolIdPub).publicKey;
-  const bitmapExtensionAccount = await connection.getAccountInfo(bitmapExtensionAddr);
-  const tickarrayBitmapExtension = TickArrayBitmapExtensionLayout.decode(bitmapExtensionAccount.data);
-
-  const simulation = swapInternal({
-    programId,
-    poolId: poolIdPub,
-    poolInfo: rpcData,
-    tickArrays,
-    configInfo,
-    tickarrayBitmapExtension,
-    amountSpecified: amountIn,
-    sqrtPriceLimitX64: new BN(0),
-    zeroForOne,
-    isBaseInput: true,
-    blockTimestamp: Math.floor(Date.now() / 1000),
-    includeExtraTickArrays: true,
+  const quote = raydium.cpmm.computeSwapAmount({
+    pool: computePoolInfo,
+    amountIn: amountInAtomic,
+    outputMint,
+    slippage: 0.05,
   });
+  const baseIn = poolInfo.mintA.address === inputMint;
 
-  const amountOutMin = simulation.amountCalculated.muln(99).divn(100);
-  const inputMint = zeroForOne ? poolInfo.mintA.address : poolInfo.mintB.address;
-
-  const { execute } = await raydium.clmm.swap({
+  const { execute } = await raydium.cpmm.swap({
     poolInfo,
-    inputMint,
-    amountIn,
-    amountOutMin,
-    observationId: rpcData.observationId,
-    ownerInfo: { useSOLBalance: true },
-    remainingAccounts: simulation.accounts,
+    poolKeys,
+    inputAmount: amountInAtomic,
+    swapResult: quote.swapResult,
+    slippage: 0.05,
+    baseIn,
     txVersion: TxVersion.V0,
   });
   const result = await execute({ sendAndConfirm: true });
 
-  return { txId: result?.txId ?? String(result), coinAmountOut: simulation.amountCalculated };
+  return { txId: result?.txId ?? String(result), amountOutAtomic: quote.swapResult.outputAmount };
 }
 
 // Burns `amountAtomic` of COIN from the platform's own ATA — the second

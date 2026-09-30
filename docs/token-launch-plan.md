@@ -1618,3 +1618,123 @@ before any signable transaction was returned.
 reward cron to CPMM; standing up the graduation-cron Railway service.
 Frontend still out of scope per the user except for the First Buy route
 change flagged above, which they explicitly asked for.
+
+## Graduation, part 6: reward cron adapted to CPMM (2026-09-30)
+
+The reward cron's harvest/collect side, fully switched from CLMM to CPMM —
+the last piece of the graduation feature that still depended on the old
+model. `getPoolPendingFees`/`harvestPoolFees`/`swapPlatformAssetForCoin`
+(CLMM, zero remaining callers) deleted from solana.mjs, same "no unused
+code" approach as parts 3 and 5.
+
+**CPMM's fee accounting is structurally different from CLMM's, confirmed
+by reading the SDK, not assumed.** CLMM's locked-position fees were pure
+on-chain state (`PositionUtils.GetPositionFees`, no network call). CPMM
+has no equivalent — there's no exported on-chain layout for the lock
+account, and `harvestLockLp` takes an explicit `lpFeeAmount` input rather
+than "harvest whatever's pending." The only source for that figure is
+Raydium's own hosted indexer (`dynamic-ipfs[-devnet].raydium.io/lock/cpmm/
+position` — the same one their own UI's claim-fees button uses). Getting
+there took two real, empirically-caught bugs, not assumptions:
+1. The SDK's own `raydium.api.fetchCpmmLockInfo()` mis-concatenates the
+   base API host in front of `CPMM_LOCK`'s already-absolute URL — confirmed
+   by a raw request against the broken URL it actually builds. Worked
+   around with a direct `fetch()` in `fetchCpmmLockPosition` (solana.mjs).
+2. The `id` query param is the lock's PDA (`getCpLockPda(programId,
+   nftMint)`), not the raw lock NFT mint — confirmed by reading
+   `fetchCpmmLockBalances`' own (working) usage inside the SDK, since
+   passing the mint directly 404's with "account not is lock nft".
+
+The indexer itself is real but genuinely laggy — empirically, anywhere
+from ~15 seconds to several minutes after a real swap before it reports
+non-zero `unclaimedFee`, and it intermittently 500s in between. Every
+caller of `getCpmmPoolPendingFees` (both the pending-fee estimate and the
+harvest itself) treats a failure as "skip this token/pool for now, try
+again next tick" — same resilience posture `fetchAssetUsdPrice` already
+had for a flaky price API, now extended to a flaky fee API.
+
+**Two more real bugs, both missing cluster-aware program IDs on
+`harvestLockLp`, each caught by actually reading a failed transaction's
+on-chain logs rather than guessing from `.message` (which was empty both
+times — these SDK errors come back as raw non-Error objects, not proper
+exceptions):**
+1. Omitting `programId`/`authProgram` silently defaulted the *lock*
+   program to its mainnet constants regardless of `CLUSTER` — surfaced as
+   a bare `InvalidProgramForExecution` runtime error with no other detail.
+2. Omitting `cpmmProgram` *separately* defaulted the pool's own program/
+   authority to their mainnet constants too — a second, independent
+   default, only found after fixing the first. Real transaction logs
+   spelled it out exactly: `AnchorError ... Error Code: InvalidProgramId
+   ... Left: CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C (mainnet) Right:
+   DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb (devnet)`. Fixed by passing
+   `cpmmProgram: { programId: CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER,
+   authProgram: CPMM_POOL_AUTHORITY_FOR_CLUSTER }` — the latter a new
+   exported constant (`getPdaPoolAuthority(CREATE_CPMM_POOL_PROGRAM_FOR_
+   CLUSTER)`), verified to byte-for-byte match the SDK's own hardcoded
+   `CREATE_CPMM_POOL_AUTH`/`DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_AUTH`
+   constants before relying on it.
+
+**A third real bug, unrelated to program IDs: `getRealHolders`'s
+exclusion list was wrong for CPMM.** The old CLMM code excluded each
+pool's own `pool_address` from "real holders" so a pool's own reserves
+never got counted as a community share. CPMM vault ownership doesn't work
+that way — `getPdaPoolAuthority` seeds only on `programId`, not `poolId`,
+meaning every CPMM pool on the whole program shares *one* vault-owner PDA.
+Excluding `pool_address` would have excluded nothing, letting a pool's own
+reserves (likely the single largest COIN balance in existence) get treated
+as a real holder and skew the community split badly. Fixed by excluding
+`CPMM_POOL_AUTHORITY_FOR_CLUSTER` instead — a single constant, not a
+per-pool list, which is actually simpler than the old code.
+
+**Where the harvested COIN-side fee goes:** CPMM fees accrue
+proportionally on *both* pool sides, unlike CLMM's single-mint-pinned
+`collectFeeOnMint`. Rather than reshape the payout schema to track two
+currencies per run (a real, contained option that was considered and set
+aside — see the alternatives it would have required: a `mint` column on
+`reward_payouts`, and duplicate community/creator/platform payout logic
+per currency), the COIN side is converted into the backing asset via a
+real swap through the same pool (`swapPlatformCpmm`, new — also now what
+Buyback & Burn's asset->COIN leg uses, replacing the deleted CLMM-only
+`swapPlatformAssetForCoin`) immediately after harvest, before the
+existing (**entirely unmodified**) platform-cut/community/creator/buyback
+split logic ever runs. Both the harvest and the conversion happen inside
+`processPool`'s existing harvest phase, together, so a crash between them
+can't leave the DB thinking a harvest that already landed on-chain hasn't
+happened — a retry just re-harvests whatever (small) amount has accrued
+since, which is safe (not a double-spend) because `harvestCpmmLockedFees`
+only ever collects what's currently pending.
+
+**reward_run_pools.pool_id's FK constraint was actively wrong for the new
+model** (`REFERENCES token_pools(id)`) and had to be dropped, not
+repointed — SQLite can't express "references either token_pools or
+final_pools depending on which model created this run," and there's no
+single table to point at anymore. Migrated via the standard SQLite
+recreate-table pattern (new table without the constraint, copy rows, drop,
+rename), guarded to run only when an existing DB's stored schema text
+still mentions `token_pools`, verified against a simulated pre-migration
+database with a real legacy row before touching the real one — the row
+survived, and post-migration reward_run_pools inserts using a final_pools
+id (which would have hit the FK before) confirmed the constraint was
+really gone.
+
+**Verified end-to-end on devnet, for real, not a substitute:** created a
+real locked CPMM pool, generated real fees on both sides via two real
+swaps (buy COIN with the backing asset, then sell some COIN back), gave a
+real buyer wallet real COIN so community distribution had an actual
+holder to pay, then ran the real, unmodified `runRewardCycle()` — with
+retries, since the indexer lag described above is real and the test hit
+it repeatedly. Confirmed for real: the harvest landed with a real tx,
+platform/community/creator/buyback payouts all landed with real transfers
+whose amounts summed *exactly* to the harvested total (671 + 3023 + 1813
++ 1210 = 6717), the buyer's balance increased by exactly the
+community+creator amounts, buyback's swap+burn produced a real burned-COIN
+amount recorded in `secondary_amount`, and a second `runRewardCycle()`
+call against the same, now-complete run was confirmed to be a true no-op
+(no duplicate rows, no duplicate payouts).
+
+**Still not done:** the First Buy frontend update; standing up the
+graduation-cron Railway service. With this, every backend piece of the
+graduation feature described in this doc (pre-market pool, closing it,
+splitting into final CPMM pools, the depletion cron, launch.mjs, and now
+the reward cron) is built and individually verified on devnet. Frontend
+still out of scope per the user throughout.

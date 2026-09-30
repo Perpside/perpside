@@ -84,11 +84,16 @@ db.exec(`
   );
 
   -- Per-pool harvest result within a run. amount fields are stored as text
-  -- — atomic token amounts can exceed JS's safe integer range.
+  -- — atomic token amounts can exceed JS's safe integer range. pool_id has
+  -- no FK constraint (not "REFERENCES token_pools(id)" as it once was) —
+  -- it's the id of a final_pools row for any run created under the new
+  -- CPMM model, or a legacy token_pools row for an old CLMM one, and SQLite
+  -- can't express an FK against either-of-two tables. Enforced at the app
+  -- level (db.mjs's own insert/lookup functions), not the schema level.
   CREATE TABLE IF NOT EXISTS reward_run_pools (
     id TEXT PRIMARY KEY,
     run_id TEXT NOT NULL REFERENCES reward_runs(id),
-    pool_id TEXT NOT NULL REFERENCES token_pools(id),
+    pool_id TEXT NOT NULL,
     backing_asset TEXT NOT NULL,
     backing_asset_mint TEXT NOT NULL,
     harvested_amount TEXT,
@@ -224,6 +229,36 @@ if (!rewardPayoutColumns.includes('secondary_amount')) {
   db.exec('ALTER TABLE reward_payouts ADD COLUMN secondary_amount TEXT');
 }
 
+// reward_run_pools.pool_id originally had "REFERENCES token_pools(id)" —
+// wrong under the new CPMM model, whose pool_id values are final_pools
+// rows (see the table's own comment above). SQLite can't ALTER a column's
+// FK constraint in place, so this recreates the table without it whenever
+// an older DB still has the stale constraint — detected by checking the
+// table's own stored SQL text rather than assuming, since ALTER TABLE
+// ADD COLUMN migrations elsewhere in this file leave old constraints
+// untouched. Existing rows are preserved as-is; there's nothing to
+// re-validate since dropping a constraint can't make a row invalid.
+const rewardRunPoolsSql = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='reward_run_pools'").get()?.sql;
+if (rewardRunPoolsSql?.includes('token_pools')) {
+  db.exec(`
+    CREATE TABLE reward_run_pools_new (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES reward_runs(id),
+      pool_id TEXT NOT NULL,
+      backing_asset TEXT NOT NULL,
+      backing_asset_mint TEXT NOT NULL,
+      harvested_amount TEXT,
+      harvest_tx TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error_message TEXT,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO reward_run_pools_new SELECT * FROM reward_run_pools;
+    DROP TABLE reward_run_pools;
+    ALTER TABLE reward_run_pools_new RENAME TO reward_run_pools;
+  `);
+}
+
 export function insertToken({
   mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status,
   xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets,
@@ -296,13 +331,16 @@ export function listTokens() {
   }));
 }
 
-// Only 'complete' launches have real pools to check — 'pools_pending' or
-// 'failed' launches have nothing (or only partial state) to harvest against.
+// Only 'complete' launches have real pools to check — 'minting'/'premarket'/
+// 'graduating'/'failed' launches have nothing (or only partial state) to
+// harvest against. A token only ever reaches 'complete' via graduation now
+// (see graduation.mjs), so its real pools are in final_pools (CPMM), not
+// the legacy token_pools table — see rewards.mjs "Reward cron: CPMM".
 export function listCompleteTokens() {
   const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE status = 'complete' ORDER BY created_at ASC`).all();
   return tokens.map((t) => ({
     ...t,
-    pools: db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(t.mint_address),
+    pools: db.prepare('SELECT * FROM final_pools WHERE mint_address = ?').all(t.mint_address),
   }));
 }
 

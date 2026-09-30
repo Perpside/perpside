@@ -1365,3 +1365,54 @@ premarket→graduating→complete status flow; removing the old
 fixed-$5,000-FDV immediate-3-CLMM-pool code path from launch.mjs now that
 it's being replaced, not just added alongside. Frontend explicitly out of
 scope for this pass per the user.
+
+## Graduation, part 2: closing the pre-market pool + orchestration (2026-09-30)
+
+**closePreMarketPool (solana.mjs).** One `decreaseLiquidity` call with
+`ownerInfo: { useSOLBalance: true, closePosition: true }` and
+`liquidity: ownerPosition.liquidity` (i.e. 100%) withdraws the position's
+entire principal *and* reclaims the position account's rent in a single
+transaction — no separate close step needed, since this position was
+never locked. Returns exact received amounts by diffing the platform's
+real SOL and COIN balances before/after (same pattern as the rest of this
+session), not a computed estimate — so the ~0.002 SOL of reclaimed rent
+just falls naturally into `solReceivedLamports` along with the withdrawn
+liquidity, which is fine: the caller only needs "how much do I have to
+work with now," not a rent-exclusive figure. Verified end-to-end on
+devnet: minted a token, opened a real pre-market position, swapped
+against it, then closed it — confirmed both SOL and COIN landed in the
+platform wallet and the position account itself is gone (rent reclaimed).
+
+**swapPlatformSolForAsset (solana.mjs).** Platform-signed, immediate
+Jupiter swap — same quote → build → sign → send → confirm shape as First
+Buy's existing hop1, just self-signed instead of built for a user to sign.
+Same already-accepted limitation as hop1: Jupiter has zero devnet
+liquidity, so this function cannot be exercised on devnet at all, only on
+mainnet. Not a new gap, just a second place the existing one shows up.
+
+**graduation.mjs (new file).** `graduateToken({ coinMint, poolId,
+positionNftMint, backingAssets, totalRewardFeePercent })` composes the
+three pieces above plus the already-verified `createCpmmPoolAndLock` into
+the actual graduation process: close the pre-market position, split the
+recovered SOL and COIN evenly across however many backing assets (1–3)
+this launch was configured with, swap each SOL share into its backing
+asset, and seed + lock one CPMM pool per asset with the results. Mirrors
+`rewards.mjs`'s layering — `solana.mjs` holds single on-chain operations,
+this file composes them into the business process. The even-split helper
+(`splitAtomicEvenly`, remainder folded into the last share) is the same
+approach as `calibration.mjs`'s `splitSupplyEvenly`, just over `BN`
+instead of `BigInt` since atomic amounts move through `solana.mjs` as
+`BN`. Verified in isolation: the split math sums back to the exact input
+total for 1, 2, and 3 shares. The orchestration wiring itself (field
+names/shapes between each step's return value and the next step's call)
+was cross-checked by reading every function it calls, not assumed — but
+`graduateToken` as a whole has *not* been run end-to-end, because its
+Jupiter swap step is the same untestable-on-devnet gap as
+`swapPlatformSolForAsset` alone. Every other piece it calls
+(`closePreMarketPool`, `createCpmmPoolAndLock`) was already independently
+verified for real on devnet before being wired in here.
+
+**Still not done:** a cron to detect a depleted pre-market position and
+call `graduateToken`; adapting the reward cron to CPMM; DB schema/status
+flow; replacing the old launch.mjs flow with this one. Frontend still out
+of scope per the user.

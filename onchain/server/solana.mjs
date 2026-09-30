@@ -1,4 +1,4 @@
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
+import { Connection, Keypair, PublicKey, SystemProgram, Transaction, VersionedTransaction, sendAndConfirmTransaction } from '@solana/web3.js';
 import {
   TOKEN_PROGRAM_ID,
   MINT_SIZE,
@@ -50,7 +50,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { isCoinMintA, calibratePool, calibratePreMarketPool, toAtomicUnits, PREMARKET_CURVE_COIN_WHOLE } from './calibration.mjs';
-import { SOL_MINT } from './jupiter.mjs';
+import { SOL_MINT, getSwapQuote, buildSwapTx } from './jupiter.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -611,6 +611,77 @@ export async function createPreMarketPool({ coinMint }) {
     createTx: createResult?.txId ?? String(createResult),
     openTx: openResult?.txId ?? String(openResult),
   };
+}
+
+// Graduation's other half: withdraws 100% of a pre-market position's
+// current liquidity in one call (decreaseLiquidity with closePosition:
+// true also reclaims the position account's rent) and returns exactly how
+// much SOL and COIN came back, by diffing the platform's own balances
+// around the call rather than trusting a computed estimate — same
+// diff-the-real-balance approach harvestPoolFees already uses for CLMM
+// fee collection. Works whether the position is genuinely fully depleted
+// (the real graduation case — comes back ~100% SOL) or only partially
+// swept (accrued trading fees come back too either way, since this
+// position was deliberately never locked).
+export async function closePreMarketPool({ poolId, positionNftMint, coinMint }) {
+  const raydium = await getRaydium();
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+
+  const solBalanceBefore = await connection.getBalance(payer.publicKey);
+  const coinBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
+
+  const { poolInfo, poolKeys } = await raydium.clmm.getPoolInfoFromRpc(poolId);
+  const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, new PublicKey(positionNftMint)).publicKey;
+  const positionAccountInfo = await connection.getAccountInfo(positionPda);
+  const ownerPosition = PersonalPositionLayout.decode(positionAccountInfo.data);
+
+  const { execute } = await raydium.clmm.decreaseLiquidity({
+    poolInfo,
+    poolKeys,
+    ownerPosition,
+    ownerInfo: { useSOLBalance: true, closePosition: true },
+    liquidity: ownerPosition.liquidity,
+    amountMinA: new BN(0),
+    amountMinB: new BN(0),
+    txVersion: TxVersion.V0,
+  });
+  const result = await execute({ sendAndConfirm: true });
+
+  // Rent reclaimed from closePosition also lands in the platform's SOL
+  // balance, on top of whatever the position held — harmless to lump in
+  // together here since it's a tiny, fixed amount (~0.002 SOL) next to a
+  // graduation-sized withdrawal, and the caller only needs "how much did
+  // I get back to work with," not a rent-exclusive figure.
+  const solBalanceAfter = await connection.getBalance(payer.publicKey);
+  const coinBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
+
+  return {
+    txId: result?.txId ?? String(result),
+    solReceivedLamports: new BN(solBalanceAfter - solBalanceBefore),
+    coinReceivedAtomic: coinBalanceAfter.sub(coinBalanceBefore),
+  };
+}
+
+// Converts a share of the SOL graduation just raised into one backing
+// asset — platform-signed and sent immediately, unlike buildFirstBuyTx's
+// hop1 (which returns an unsigned tx for the *creator* to sign). Same
+// Jupiter dependency and the same limitation: Jupiter has no devnet
+// liquidity to route through, so this is mainnet-only in practice, exactly
+// like First Buy's hop1 already is — not re-verified here since it's the
+// identical, already-accepted gap (see launch.mjs prepareFirstBuyHop1).
+export async function swapPlatformSolForAsset({ assetMint, amountInLamports }) {
+  const payer = getPlatformWallet();
+  const connection = getConnection();
+
+  const quote = await getSwapQuote({ inputMint: SOL_MINT, outputMint: assetMint, amountLamports: amountInLamports.toString() });
+  const txBase64 = await buildSwapTx({ quoteResponse: quote, userPublicKey: payer.publicKey.toBase58() });
+  const tx = VersionedTransaction.deserialize(Buffer.from(txBase64, 'base64'));
+  tx.sign([payer]);
+  const sig = await connection.sendTransaction(tx);
+  await connection.confirmTransaction(sig, 'confirmed');
+
+  return { txId: sig, amountOutAtomic: new BN(quote.outAmount) };
 }
 
 // A graduated token's real final pool: a standard two-sided Raydium AMM

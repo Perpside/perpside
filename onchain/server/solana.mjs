@@ -25,6 +25,10 @@ import {
   CLMM_PROGRAM_ID,
   CLMM_LOCK_PROGRAM_ID,
   CLMM_LOCK_AUTH_ID,
+  CREATE_CPMM_POOL_PROGRAM,
+  CREATE_CPMM_POOL_FEE_ACC,
+  LOCK_CPMM_PROGRAM,
+  LOCK_CPMM_AUTH,
   TxVersion,
   getPdaExBitmapAccount,
   getPdaPersonalPositionAddress,
@@ -32,6 +36,7 @@ import {
   getPdaLockClPositionIdV2,
   PersonalPositionLayout,
   PoolInfoLayout,
+  CpmmPoolInfoLayout,
   TickArrayLayout,
   TickArrayUtil,
   PositionUtils,
@@ -44,7 +49,8 @@ import bs58 from 'bs58';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isCoinMintA, calibratePool, toAtomicUnits } from './calibration.mjs';
+import { isCoinMintA, calibratePool, calibratePreMarketPool, toAtomicUnits, PREMARKET_CURVE_COIN_WHOLE } from './calibration.mjs';
+import { SOL_MINT } from './jupiter.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -67,6 +73,10 @@ if (CLUSTER === 'mainnet-beta' && /devnet/i.test(RPC_URL)) {
 export const CLMM_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_PROGRAM_ID;
 export const CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_PROGRAM_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_PROGRAM_ID;
 export const CLMM_LOCK_AUTH_ID_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CLMM_LOCK_AUTH_ID : DEVNET_PROGRAM_ID.CLMM_LOCK_AUTH_ID;
+export const CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CREATE_CPMM_POOL_PROGRAM : DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_PROGRAM;
+export const CREATE_CPMM_POOL_FEE_ACC_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? CREATE_CPMM_POOL_FEE_ACC : DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_FEE_ACC;
+export const LOCK_CPMM_PROGRAM_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? LOCK_CPMM_PROGRAM : DEVNET_PROGRAM_ID.LOCK_CPMM_PROGRAM;
+export const LOCK_CPMM_AUTH_FOR_CLUSTER = CLUSTER === 'mainnet-beta' ? LOCK_CPMM_AUTH : DEVNET_PROGRAM_ID.LOCK_CPMM_AUTH;
 
 // Some RPC-client error messages embed the request URL, which carries our
 // API key in its query string — strip it before any such message can reach
@@ -155,6 +165,57 @@ export function listFeeTierPercents({ cluster = CLUSTER, maxPercent } = {}) {
   const configs = cluster === 'mainnet-beta' ? MAINNET_AMM_CONFIGS : DEVNET_AMM_CONFIGS;
   const percents = [...new Set(configs.map((c) => c.tradeFeeRate / 10000))].sort((a, b) => a - b);
   return typeof maxPercent === 'number' ? percents.filter((p) => p <= maxPercent) : percents;
+}
+
+// Final-pool fee configs for Raydium's *standard* AMM (CPMM), not CLMM —
+// graduation deposits real two-sided liquidity (COIN + whatever the raised
+// SOL bought), and a plain constant-product pool has no tick range to
+// calibrate a ceiling into, which is the entire reason it's used here
+// instead of CLMM for the post-graduation pools (see
+// docs/token-launch-plan.md "Graduation"). `creatorFeeRate` is a *separate*
+// protocol-native fee (not a slice of tradeFeeRate — some tiers have
+// creatorFeeRate exceeding tradeFeeRate, confirmed against Raydium's own
+// numbers below), claimable directly via collectCreatorFees, so it funds
+// the reward model's Creator leg without any custom harvest logic.
+// Sourced live from api-v3[-devnet].raydium.io/main/cpmm-config on
+// 2026-09-30; `showWithUI: true` entries only (the others are unlisted/
+// partner-specific tiers, same reasoning as the CLMM config list).
+const DEVNET_CPMM_CONFIGS = [
+  { id: '5MxLgy9oPdTC3YgkiePHqr3EoCRD9uLVYRQS2ANAs7wy', index: 0, tradeFeeRate: 2500, creatorFeeRate: 2500 },
+  { id: 'HTVWgp8CbUsRNmRE1p9RBYqopxe2qiyApSkiTFLrfxaW', index: 1, tradeFeeRate: 3000, creatorFeeRate: 2500 },
+  { id: 'A9qBhPy4k5UYW72hSgAkh1Epr2do69P54yzzcMV3yv6b', index: 2, tradeFeeRate: 5000, creatorFeeRate: 2500 },
+  { id: 'EsTevfacYXpuho5VBuzBjDZi8dtWidGnXoSYAr8krTvz', index: 3, tradeFeeRate: 10000, creatorFeeRate: 2500 },
+  { id: '5Gt9qrPJ6FVe9VHtwF2W2JrFR6p9jmx4DxBkgfPdaApk', index: 4, tradeFeeRate: 40000, creatorFeeRate: 2500 },
+];
+const MAINNET_CPMM_CONFIGS = [
+  { id: 'D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2', index: 0, tradeFeeRate: 2500, creatorFeeRate: 500 },
+  { id: 'BgxH5ifebqHDuiADWKhLjXGP5hWZeZLoCdmeWJLkRqLP', index: 5, tradeFeeRate: 3000, creatorFeeRate: 500 },
+  { id: 'BhH6HphjBKXu2PkUc2aw3xEMdUvK14NXxE5LbNWZNZAA', index: 4, tradeFeeRate: 5000, creatorFeeRate: 500 },
+  { id: 'G95xxie3XbkCqtE39GgQ9Ggc7xBC8Uceve7HFDEFApkc', index: 1, tradeFeeRate: 10000, creatorFeeRate: 500 },
+  { id: 'B5u5x9S5pyaJdonf7bXUiEnBfEXsJWhNxXfLGAbRFtg2', index: 6, tradeFeeRate: 15000, creatorFeeRate: 500 },
+  { id: '2fGXL8uhqxJ4tpgtosHZXT4zcQap6j62z3bMDxdkMvy5', index: 2, tradeFeeRate: 20000, creatorFeeRate: 500 },
+  { id: 'ESLj2Rzmvn3RhDo4Z18hY1wYmGyC9xM4ZtRXhvoFkDAi', index: 7, tradeFeeRate: 25000, creatorFeeRate: 500 },
+  { id: 'C7Cx2pMLtjybS3mDKSfsBj4zQ3PRZGkKt7RCYTTbCSx2', index: 3, tradeFeeRate: 40000, creatorFeeRate: 500 },
+];
+const CPMM_SHARED_FIELDS = { protocolFeeRate: 120000, fundFeeRate: 40000, createPoolFee: '150000000' };
+
+function toCpmmConfig(entry) {
+  return { ...CPMM_SHARED_FIELDS, id: entry.id, index: entry.index, tradeFeeRate: entry.tradeFeeRate, creatorFeeRate: entry.creatorFeeRate };
+}
+
+// Same nearest-tier reasoning as pickAmmConfig — CPMM fee configs are just
+// as admin-gated on-chain, so this snaps to the closest one Raydium
+// actually publishes rather than pretending an exact rate is possible.
+export function pickCpmmConfig(totalFeePercent) {
+  const configs = CLUSTER === 'mainnet-beta' ? MAINNET_CPMM_CONFIGS : DEVNET_CPMM_CONFIGS;
+  if (!totalFeePercent || totalFeePercent <= 0) {
+    return toCpmmConfig(configs.find((c) => c.tradeFeeRate === 2500) ?? configs[0]);
+  }
+  const targetRate = totalFeePercent * 10000;
+  const closest = configs.reduce((best, c) =>
+    Math.abs(c.tradeFeeRate - targetRate) < Math.abs(best.tradeFeeRate - targetRate) ? c : best
+  );
+  return toCpmmConfig(closest);
 }
 
 export const COIN_DECIMALS = 6;
@@ -473,6 +534,150 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
     startPrice: startPrice.toString(),
     createTx: createResult?.txId ?? String(createResult),
     openTx: openResult?.txId ?? String(openResult),
+    lockTx: lockResult?.txId ?? String(lockResult),
+  };
+}
+
+// Pre-market pool: a single-sided COIN/SOL position sized (see
+// calibration.mjs calibratePreMarketPool) so that fully depleting it raises
+// ~85 SOL — pump.fun's own graduation target, replicated here so a launch
+// feels the same to trade against even though the mechanics underneath
+// (a real CLMM range, not a virtual-reserve curve) are different.
+//
+// Deliberately left *unlocked*, unlike createPoolAndPosition's final pools
+// — graduation (see graduatePreMarketPool below) has to be able to close
+// this position and withdraw the real SOL it collected, which Raydium's
+// Lock CL Position program exists specifically to make impossible. The
+// position NFT sits in the platform wallet's own ATA in the meantime, the
+// same custody model the platform already has over every other step of a
+// launch before anything gets locked.
+//
+// Real Raydium pool from the moment this lands on-chain, so anyone can
+// already trade against it directly (Raydium's own UI, Jupiter once it's
+// indexed) — no separate buy/sell path needed on top of this.
+export async function createPreMarketPool({ coinMint }) {
+  const raydium = await getRaydium();
+  const connection = getConnection();
+  const coinIsMintA = isCoinMintA(coinMint, SOL_MINT);
+
+  const ammConfig = pickAmmConfig(0); // fee rate doesn't matter here — this position isn't locked, so any accrued fees come back automatically when it's closed at graduation, not harvested separately.
+
+  const { tickLower, tickUpper, base, startPrice, coinShareAtomic } = calibratePreMarketPool({
+    coinIsMintA,
+    coinDecimals: COIN_DECIMALS,
+    solDecimals: 9,
+    tickSpacing: ammConfig.tickSpacing,
+  });
+
+  const coinToken = toApiV3Token(coinMint, COIN_DECIMALS, 'COIN');
+  const solToken = toApiV3Token(SOL_MINT, 9, 'SOL');
+
+  const { execute: executeCreate, extInfo: createExtInfo } = await raydium.clmm.createCustomizablePool({
+    programId: CLMM_PROGRAM_ID_FOR_CLUSTER,
+    mint1: coinIsMintA ? coinToken : solToken,
+    mint2: coinIsMintA ? solToken : coinToken,
+    ammConfig,
+    initialPrice: startPrice,
+    collectFeeOnMint: new PublicKey(SOL_MINT),
+    txVersion: TxVersion.V0,
+  });
+  const createResult = await executeCreate({ sendAndConfirm: true });
+
+  const mockPoolInfo = createExtInfo.mockPoolInfo;
+  const poolKeys = createExtInfo.address;
+  const rawPoolId = poolKeys.id ?? poolKeys.poolId;
+  const poolId = typeof rawPoolId === 'string' ? rawPoolId : rawPoolId.toBase58();
+
+  const { execute: executeOpen, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
+    poolInfo: mockPoolInfo,
+    poolKeys,
+    ownerInfo: { useSOLBalance: true },
+    tickLower,
+    tickUpper,
+    base,
+    baseAmount: coinShareAtomic,
+    otherAmountMax: new BN(1000), // same rounding buffer as createPoolAndPosition
+    txVersion: TxVersion.V0,
+  });
+  const openResult = await executeOpen({ sendAndConfirm: true });
+  const positionNftMint = openExtInfo.nftMint;
+
+  return {
+    poolId,
+    positionNftMint: positionNftMint.toBase58(),
+    tickLower,
+    tickUpper,
+    startPrice: startPrice.toString(),
+    createTx: createResult?.txId ?? String(createResult),
+    openTx: openResult?.txId ?? String(openResult),
+  };
+}
+
+// A graduated token's real final pool: a standard two-sided Raydium AMM
+// (CPMM), not CLMM — deliberately, so there's no tick range to calibrate a
+// ceiling into (see calibratePreMarketPool's own comment and
+// docs/token-launch-plan.md "Graduation"). Deposits real reserves on both
+// sides — the COIN held back from the pre-market allocation, and whatever
+// backing asset graduation bought with its share of the raised SOL — so
+// there's no single-sided calibration needed here at all, just a normal
+// dual-token liquidity add.
+//
+// Locked immediately via CPMM's own Lock LP program — the fungible-LP
+// equivalent of CLMM's Lock CL Position program used for the pre-market
+// pool's non-existent final-pool predecessor. Same guarantee: once locked,
+// nobody (platform included) can withdraw the underlying liquidity:
+// collectCreatorFees/harvestLockLp remain available for the reward model
+// without that guarantee being at odds with fee collection.
+export async function createCpmmPoolAndLock({ coinMint, assetMint, coinAmountAtomic, assetAmountAtomic, totalRewardFeePercent }) {
+  const raydium = await getRaydium();
+  const connection = getConnection();
+  const payer = getPlatformWallet();
+
+  const feeConfig = pickCpmmConfig(totalRewardFeePercent);
+  const coinToken = { address: coinMint, decimals: COIN_DECIMALS, programId: TOKEN_PROGRAM_ID.toBase58() };
+  const assetToken = { address: assetMint, decimals: 6, programId: TOKEN_PROGRAM_ID.toBase58() };
+  const coinIsMintA = isCoinMintA(coinMint, assetMint);
+
+  const { execute: executeCreate, extInfo: createExtInfo } = await raydium.cpmm.createPool({
+    programId: CREATE_CPMM_POOL_PROGRAM_FOR_CLUSTER,
+    poolFeeAccount: CREATE_CPMM_POOL_FEE_ACC_FOR_CLUSTER,
+    mintA: coinIsMintA ? coinToken : assetToken,
+    mintB: coinIsMintA ? assetToken : coinToken,
+    mintAAmount: coinIsMintA ? coinAmountAtomic : assetAmountAtomic,
+    mintBAmount: coinIsMintA ? assetAmountAtomic : coinAmountAtomic,
+    startTime: new BN(0),
+    feeConfig,
+    associatedOnly: false,
+    ownerInfo: { useSOLBalance: true },
+    txVersion: TxVersion.V0,
+  });
+  const createResult = await executeCreate({ sendAndConfirm: true });
+
+  const poolId = createExtInfo.address.poolId.toBase58();
+  const lpMint = createExtInfo.address.lpMint;
+  const lpMintPk = lpMint.toBase58 ? lpMint : new PublicKey(lpMint);
+
+  const lpAta = await getAssociatedTokenAddress(lpMintPk, payer.publicKey);
+  const lpAccount = await getAccount(connection, lpAta);
+  const lpAmount = new BN(lpAccount.amount.toString());
+
+  const { poolInfo, poolKeys } = await raydium.cpmm.getPoolInfoFromRpc(poolId);
+  const { execute: executeLock, extInfo: lockExtInfo } = await raydium.cpmm.lockLp({
+    poolInfo,
+    poolKeys,
+    lpAmount,
+    programId: LOCK_CPMM_PROGRAM_FOR_CLUSTER,
+    authProgram: LOCK_CPMM_AUTH_FOR_CLUSTER,
+    withMetadata: true,
+    txVersion: TxVersion.V0,
+  });
+  const lockResult = await executeLock({ sendAndConfirm: true });
+
+  return {
+    poolId,
+    lpMint: lpMintPk.toBase58(),
+    lockNftMint: lockExtInfo.nftMint.toBase58(),
+    createTx: createResult?.txId ?? String(createResult),
     lockTx: lockResult?.txId ?? String(lockResult),
   };
 }

@@ -1288,3 +1288,80 @@ went `['earn'] → ['earn','token'] → ['earn','token','how'] →
 (hero "Launch" button, footer "How it Works" link) still return to
 landing correctly, and a deeper four-level chain (Explore → Token → How →
 Launch, three Backs) unwinds one page at a time exactly as expected.
+
+## Graduation, part 1: pre-market CLMM pool + CPMM final pools, building blocks (2026-09-30)
+
+Prompted by the price-ceiling question above: a single-sided CLMM range
+always has a hard ceiling (the position runs out of COIN to sell once
+price sweeps the whole range), and with a fixed total supply that means a
+fixed maximum FDV per launch (~20x the starting FDV, confirmed
+empirically earlier). Two decisions to fix this, from the user, replacing
+the current "3 CLMM pools live immediately at a fixed $5,000 target FDV"
+model entirely:
+
+1. **Pre-market**: at launch, one single-sided CLMM position, COIN paired
+   against native SOL — not locked, since graduation needs to close it.
+   Sized to replicate pump.fun's own real numbers rather than inventing
+   new ones: 793,100,000 COIN (79.31% of supply) committed to the
+   position, calibrated so full depletion yields ~85 SOL, starting at
+   pump.fun's own implied price (30 virtual SOL / 1.073B virtual tokens).
+   Confirmed against pump-fun-sdk's own bonding-curve-math.md rather than
+   memory. The other 206,900,000 COIN (20.69%) stays in reserve for
+   graduation.
+2. **Final pools are standard Raydium AMM (CPMM), not CLMM** — deliberate,
+   specifically so there's no tick range and therefore no ceiling: a
+   constant-product pool's price can run arbitrarily high as one side
+   depletes, asymptotically, with no hard wall. Graduation deposits real
+   two-sided liquidity (the reserved COIN + whatever backing asset the
+   raised SOL bought), so there's no single-sided calibration to do at
+   this step at all — just a normal liquidity add.
+
+**calibratePreMarketPool (calibration.mjs).** Unlike calibratePool's
+`ceilingMultiplier` (an arbitrary, independently-chosen range width), here
+the range width is *solved for*: given a fixed COIN amount and a fixed
+target SOL raise, there's exactly one range width that hits it. Solved by
+bisection against the SDK's own `getLiquidityFromAmountA` /
+`getDeltaAmountBUnsigned` — not a hand-derived closed form — so a mistake
+shows up as "didn't converge" rather than a silently wrong pool. First
+version of the bisection had a real sign bug in the `coinIsMintA=false`
+branch (searched in the wrong direction, converged to a nonsense multi-
+billion-SOL answer) — caught by testing both orientations, not just one;
+fixed by tracking "narrow"/"wide" range bounds directly instead of lo/hi
+with a per-orientation sign flip. Verified: both orientations now converge
+to within 0.05% of the 85 SOL target.
+
+**createPreMarketPool (solana.mjs).** Same createCustomizablePool +
+openPositionFromBase pattern as the existing createPoolAndPosition, minus
+the final lockPosition call — the position NFT stays in the platform
+wallet's own ATA, closable later. Verified on devnet: pool decodes with
+`liquidity: 0` at the current tick (genuinely single-sided, price sitting
+exactly on the boundary) and the position NFT confirmed sitting in the
+platform wallet, not sent to any lock program.
+
+**createCpmmPoolAndLock (solana.mjs) + pickCpmmConfig.** CPMM has its own
+separate fee-config system from CLMM's AMM configs — fetched live from
+`api-v3[-devnet].raydium.io/main/cpmm-config` the same way the CLMM list
+was. Notable: `creatorFeeRate` is a *separate* protocol-native fee, not a
+slice of `tradeFeeRate` (some tiers have `creatorFeeRate` exceeding
+`tradeFeeRate` — confirmed from Raydium's own numbers, not assumed) and
+claimable directly via `collectCreatorFees`/`collectCreatorFeesPermissionless`
+— likely replaces the reward cron's custom-built Creator-payout logic
+entirely once the harvest side is adapted (not done yet, see below).
+Locking uses CPMM's own Lock LP program (`lockLp`/`harvestLockLp`) — the
+fungible-LP-token equivalent of CLMM's Lock CL Position program, same
+"nobody can withdraw the underlying liquidity, ever" guarantee. Verified
+end-to-end on devnet: created a real dual-sided pool (COIN + a backing
+asset), locked 100% of the resulting LP tokens, confirmed the platform's
+LP balance is exactly 0 afterward.
+
+**Not done yet, tracked for the next pass:** actually closing the
+pre-market position at graduation (decreaseLiquidity + closePosition) and
+extracting its SOL; splitting that SOL and swapping into backing assets;
+a cron to detect a depleted pre-market position and trigger graduation;
+adapting the reward cron's harvest/distribution logic from CLMM's
+`harvestPoolFees`/`getPoolPendingFees` to CPMM's `harvestLockLp`/
+`collectCreatorFees`; DB schema for pre-market pools and a
+premarket→graduating→complete status flow; removing the old
+fixed-$5,000-FDV immediate-3-CLMM-pool code path from launch.mjs now that
+it's being replaced, not just added alongside. Frontend explicitly out of
+scope for this pass per the user.

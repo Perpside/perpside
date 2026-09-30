@@ -39,6 +39,13 @@ db.exec(`
     -- so pre-graduation rows already in the DB keep reading correctly.
     status TEXT NOT NULL DEFAULT 'minting',
     error_message TEXT,
+    -- JSON array of the backing-asset symbols (e.g. '["XSOL","XHYPE"]') the
+    -- creator picked at launch — 1-3 entries, same list launch.mjs's
+    -- assertAssets validates against. The new pre-market flow needs this
+    -- remembered from launch time: unlike the old model, final pools (and
+    -- therefore which assets to split graduation SOL/COIN across) aren't
+    -- created until graduation, long after launch.
+    backing_assets TEXT,
     created_at TEXT NOT NULL
   );
 
@@ -198,6 +205,9 @@ for (const col of ['x_link', 'telegram_link', 'website_link']) {
 for (const col of ['community_fee', 'creator_fee', 'buyback_fee']) {
   if (!tokenColumns.includes(col)) db.exec(`ALTER TABLE tokens ADD COLUMN ${col} REAL`);
 }
+if (!tokenColumns.includes('backing_assets')) {
+  db.exec('ALTER TABLE tokens ADD COLUMN backing_assets TEXT');
+}
 const poolColumns = db.prepare("PRAGMA table_info(token_pools)").all().map((c) => c.name);
 if (!poolColumns.includes('lock_nft_mint')) {
   db.exec('ALTER TABLE token_pools ADD COLUMN lock_nft_mint TEXT');
@@ -214,19 +224,28 @@ if (!rewardPayoutColumns.includes('secondary_amount')) {
 
 export function insertToken({
   mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status,
-  xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
+  xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets,
 }) {
   db.prepare(`
     INSERT INTO tokens (
       mint_address, name, ticker, image_url, metadata_uri, creator_wallet, first_buy_lamports, status,
-      x_link, telegram_link, website_link, community_fee, creator_fee, buyback_fee, created_at
+      x_link, telegram_link, website_link, community_fee, creator_fee, buyback_fee, backing_assets, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     mintAddress, name, ticker, imageUrl ?? null, metadataUri ?? null, creatorWallet ?? null, firstBuyLamports ?? null, status ?? 'minting',
     xLink ?? null, telegramLink ?? null, websiteLink ?? null, communityFee ?? null, creatorFee ?? null, buybackFee ?? null,
+    backingAssets ? JSON.stringify(backingAssets) : null,
     new Date().toISOString()
   );
+}
+
+// Decodes the JSON symbol list insertToken stored — null for any row
+// launched before this column existed (the old model didn't need it, since
+// its final pools were created immediately, not deferred to graduation).
+export function getTokenBackingAssetSymbols(mintAddress) {
+  const row = db.prepare('SELECT backing_assets FROM tokens WHERE mint_address = ?').get(mintAddress);
+  return row?.backing_assets ? JSON.parse(row.backing_assets) : null;
 }
 
 export function updateTokenStatus(mintAddress, status, errorMessage) {
@@ -388,11 +407,28 @@ export function markPremarketPoolClosed(id, closeTx, solReceivedLamports, coinRe
 
 // Every token currently trading pre-graduation — what a depletion-detection
 // cron iterates to check each one's pool against its ceiling tick.
+// backing_assets is pulled in here (not part of PUBLIC_TOKEN_COLUMNS,
+// which the actual public /api/tokens endpoint shares) since graduation
+// needs it internally to know which assets to seed final pools with —
+// no reason to also change the public API's response shape for that.
 export function listPremarketTokens() {
-  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE status = 'premarket' ORDER BY created_at ASC`).all();
+  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE status = 'premarket' ORDER BY created_at ASC`).all();
   return tokens.map((t) => ({
     ...t,
+    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
     premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'active'").get(t.mint_address),
+  }));
+}
+
+// Tokens mid-graduation when the process last exited — resumable the same
+// way listPremarketTokens' active pools are, just further along (the pool
+// row is 'closing', not 'active', by the time a token reaches this status).
+export function listGraduatingTokens() {
+  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE status = 'graduating' ORDER BY created_at ASC`).all();
+  return tokens.map((t) => ({
+    ...t,
+    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'closing'").get(t.mint_address),
   }));
 }
 

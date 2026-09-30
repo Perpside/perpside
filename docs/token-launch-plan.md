@@ -1452,3 +1452,81 @@ end-to-end (insert a premarket pool, look it up, create a graduation run,
 add an asset row, mark it swapped, insert its final pool, mark it
 pool_created, close out the run, close the premarket pool) — not just a
 syntax check.
+
+## Graduation, part 4: depletion cron + resumable graduation.mjs (2026-09-30)
+
+**isPreMarketPoolDepleted (solana.mjs).** Reads the pool account's real
+`tickCurrent` (via the same `PoolInfoLayout`/stale-row-error pattern
+`getPoolPendingFees` already uses) and compares it against the position's
+range. calibratePreMarketPool always anchors the position's *start* at
+one edge (tickLower when coinIsMintA, tickUpper otherwise — see its own
+"narrow/wide" comment) — so the *ceiling* (100% swept to SOL) is always
+the opposite edge. coinIsMintA is recomputed from the two mints rather
+than trusted from a stored flag, since it's a pure function of them.
+
+**tokens.backing_assets (db.mjs).** A gap surfaced while wiring this up:
+the old model created all of a launch's final pools immediately, so which
+backing assets it used was only ever implicit in its `token_pools` rows.
+The new model defers final-pool creation to graduation, long after
+launch — so which assets the creator picked (still validated the same
+way, via launch.mjs's `assertAssets`) now has to be remembered from
+launch time. Added as a JSON-array column, decoded by
+`getTokenBackingAssetSymbols`/inlined into `listPremarketTokens` and the
+new `listGraduatingTokens`. `launch.mjs` doesn't populate it yet — that
+lands together with replacing the old launch flow.
+
+**graduation.mjs, rewritten.** The part-2 `graduateToken` (plain
+arguments in, one straight-through run, no persistence) is gone, replaced
+by `processToken`/`runGraduationCycle`, driven by
+`graduation_runs`/`graduation_run_assets` end to end:
+- No run yet + pool depleted (`isPreMarketPoolDepleted`) -> flips the pool
+  to `closing` and the token to `graduating`, opens a run.
+- Run exists but `close_tx` isn't set -> closes the pre-market position
+  for real, persists the result, marks the pool `closed`.
+- Run has no asset rows yet -> splits the recovered SOL/COIN across
+  `backing_assets` (resolved to mint addresses via launch.mjs's
+  `listBackingAssets`) and inserts one pending row per asset.
+- Each asset row -> swap its SOL share, seed + lock its CPMM pool, insert
+  the `final_pools` row. Resumption here is keyed off what's actually
+  *persisted* per row (`swap_tx`, then a created pool), not the row's
+  `status` label — a row that failed after swapping doesn't re-swap on
+  retry, matching the "trust real state over a status field" approach
+  the rest of the session has used throughout.
+- All asset rows settled -> run and token both marked `complete`; any row
+  still `failed` -> run marked `failed` but stays in the resumable set
+  (`getIncompleteGraduationRun` includes `failed`), so the *next* cron
+  tick retries automatically — same shape as rewards.mjs's reward runs.
+
+**graduation-cron.mjs (new file).** Entry point for a new Railway Cron
+Schedule service, identical shape to reward-cron.mjs — runs
+`runGraduationCycle()` once and exits. **Not deployed yet**: unlike code
+changes, standing up the actual Railway service (start command + cron
+schedule) is a dashboard/infra step, not something in the repo to push —
+needs to be created manually, same category of action as the mainnet RPC
+provider gap flagged earlier in this doc.
+
+**Verified end-to-end on devnet**, not just syntax-checked: minted a real
+coin, built a small real single-sided pre-market pool (same
+createCustomizablePool + openPositionFromBase path createPreMarketPool
+uses, just a narrow calibratePool range instead of the real 85-SOL one —
+organically depleting a real 85-SOL range on devnet was impractical, so
+this manufactures the "already depleted" DB state processToken's own
+depletion branch would produce and exercises everything downstream of
+that for real), confirmed `isPreMarketPoolDepleted` correctly reads
+`false` on a fresh position, ran `runGraduationCycle()` twice:
+- Cycle 1: closed the position for real (real close_tx, real recovered
+  SOL/COIN persisted), attempted the XSOL swap, got a clean
+  `TOKEN_NOT_TRADABLE` from Jupiter (devnet has no liquidity for the
+  devnet stand-in assets either — same accepted gap, now confirmed with
+  its exact real error shape), and persisted the failure without
+  crashing.
+- Cycle 2: resumed the same run, confirmed `close_tx` was byte-for-byte
+  identical (proving it did *not* re-close the now-gone position) and
+  exactly one `graduation_run_assets` row existed throughout (proving the
+  split doesn't re-run once seeded) while still retrying the failed swap.
+
+**Still not done:** replacing the old launch.mjs flow with
+`createPreMarketPool` + populating `backing_assets`; adapting the reward
+cron to CPMM's `harvestLockLp`/`collectCreatorFees` for graduated pools;
+standing up the graduation-cron Railway service itself. Frontend still
+out of scope per the user.

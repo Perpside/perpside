@@ -545,7 +545,7 @@ export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coi
 // (a real CLMM range, not a virtual-reserve curve) are different.
 //
 // Deliberately left *unlocked*, unlike createPoolAndPosition's final pools
-// — graduation (see graduatePreMarketPool below) has to be able to close
+// — graduation (see closePreMarketPool below) has to be able to close
 // this position and withdraw the real SOL it collected, which Raydium's
 // Lock CL Position program exists specifically to make impossible. The
 // position NFT sits in the platform wallet's own ATA in the meantime, the
@@ -611,6 +611,27 @@ export async function createPreMarketPool({ coinMint }) {
     createTx: createResult?.txId ?? String(createResult),
     openTx: openResult?.txId ?? String(openResult),
   };
+}
+
+// Whether a pre-market pool has been fully swept to its ceiling tick — the
+// depletion-detection cron's trigger to graduate. calibratePreMarketPool
+// always puts the *anchor* tick (where the position started, 100% COIN) at
+// tickLower when coinIsMintA and tickUpper otherwise (see its own comment:
+// "narrow/wide ... solAtDepletion increases monotonically moving away from
+// anchorTick"), so the ceiling — the edge the position converts entirely
+// to SOL at — is always the *other* boundary. coinIsMintA is recomputed
+// here rather than stored: isCoinMintA(coinMint, SOL_MINT) is a pure
+// function of two pubkeys, so it's always safe to derive fresh instead of
+// trusting a persisted flag to still match.
+export async function isPreMarketPoolDepleted({ poolAddress, tickLower, tickUpper, coinMint }) {
+  const connection = getConnection();
+  const poolAccountInfo = await connection.getAccountInfo(new PublicKey(poolAddress));
+  if (!poolAccountInfo) {
+    throw new Error(`pool account not found for ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
+  }
+  const poolState = PoolInfoLayout.decode(poolAccountInfo.data);
+  const coinIsMintA = isCoinMintA(coinMint, SOL_MINT);
+  return coinIsMintA ? poolState.tickCurrent >= tickUpper : poolState.tickCurrent <= tickLower;
 }
 
 // Graduation's other half: withdraws 100% of a pre-market position's

@@ -57,9 +57,11 @@ db.exec(`
     pool_address TEXT NOT NULL,
     position_nft_mint TEXT NOT NULL,
     -- Set once the position is locked via Raydium's Lock CL Position
-    -- program (see solana.mjs createPoolAndPosition) — needed later to call
-    -- harvestLockPosition and collect this position's accrued trading fees
-    -- without ever being able to withdraw the underlying liquidity itself.
+    -- program (the old model's launch flow did this immediately) — needed
+    -- later to call harvestLockPosition and collect this position's accrued
+    -- trading fees without ever being able to withdraw the underlying
+    -- liquidity itself. This table is legacy under the new pre-market/
+    -- graduation model — see premarket_pools/final_pools below.
     lock_nft_mint TEXT,
     tick_lower INTEGER NOT NULL,
     tick_upper INTEGER NOT NULL,

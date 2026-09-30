@@ -29,8 +29,7 @@ import {
   updateTokenStatus,
 } from './db.mjs';
 
-// Same "split total, remainder folded into the last share" approach as
-// calibration.mjs splitSupplyEvenly, just over a BN instead of a BigInt —
+// "Split total, remainder folded into the last share" — over a BN, since
 // atomic lamport/token amounts flow through solana.mjs as BN, not BigInt.
 function splitAtomicEvenly(total, n) {
   const base = total.divn(n);

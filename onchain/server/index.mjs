@@ -8,10 +8,8 @@ import {
   prepareFee,
   listBackingAssets,
   getLaunchConfig,
-  prepareFirstBuyHop1,
-  broadcastFirstBuyHop1,
-  prepareFirstBuyHop2,
-  broadcastFirstBuyHop2,
+  prepareFirstBuy,
+  broadcastFirstBuy,
   LaunchValidationError,
 } from './launch.mjs';
 import { listTokens, getToken, getTokenRewardTotals } from './db.mjs';
@@ -81,19 +79,19 @@ function apiRoute(handler, failMessage) {
 app.post('/api/launch/fee-tx', apiRoute(prepareFee, 'fee-tx failed'));
 
 // Step 2: broadcasts the signed fee payment, then — only once that's
-// confirmed — mints the coin and creates 1-3 calibrated pools, platform-
-// sponsored. See launch.mjs.
+// confirmed — mints the coin and opens its pre-market position, platform-
+// sponsored. See launch.mjs and docs/token-launch-plan.md "Graduation".
 app.post('/api/launch', apiRoute(launchToken, 'launch failed'));
 
-// First Buy (optional): two creator-signed hops so the resulting COIN lands
-// in their own wallet — SOL -> backing asset via Jupiter, then backing
-// asset -> COIN via the pool /api/launch just created. Mainnet-only (see
-// launch.mjs). Each hop is prepare (build unsigned tx) then broadcast
-// (send the signed tx), same shape as /api/launch/fee-tx + /api/launch.
-app.post('/api/launch/first-buy/hop1-tx', apiRoute(prepareFirstBuyHop1, 'first-buy hop1 failed'));
-app.post('/api/launch/first-buy/hop1', apiRoute(broadcastFirstBuyHop1, 'first-buy hop1 broadcast failed'));
-app.post('/api/launch/first-buy/hop2-tx', apiRoute(prepareFirstBuyHop2, 'first-buy hop2 failed'));
-app.post('/api/launch/first-buy/hop2', apiRoute(broadcastFirstBuyHop2, 'first-buy hop2 broadcast failed'));
+// First Buy (optional): one creator-signed swap, straight through the
+// pre-market pool /api/launch just opened (COIN/native-SOL, so no Jupiter
+// hop needed — see launch.mjs). Breaking change from the old two-hop
+// hop1-tx/hop1/hop2-tx/hop2 routes (removed): the frontend needs to move to
+// a single prepare-then-broadcast call with one wallet signature instead of
+// two before First Buy works again — see docs/token-launch-plan.md
+// "Graduation" for why the old two-hop shape no longer applies.
+app.post('/api/launch/first-buy/tx', apiRoute(prepareFirstBuy, 'first-buy failed'));
+app.post('/api/launch/first-buy', apiRoute(broadcastFirstBuy, 'first-buy broadcast failed'));
 
 // Same service also serves the static landing page/dashboard (index.html,
 // assets/) — one Railway service, one domain, no separate CORS story for

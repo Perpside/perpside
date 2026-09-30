@@ -1530,3 +1530,91 @@ that for real), confirmed `isPreMarketPoolDepleted` correctly reads
 cron to CPMM's `harvestLockLp`/`collectCreatorFees` for graduated pools;
 standing up the graduation-cron Railway service itself. Frontend still
 out of scope per the user.
+
+## Graduation, part 5: launch.mjs now opens the pre-market pool (2026-09-30)
+
+The live minting path — the highest-risk piece of this whole feature,
+since it's what every real launch actually calls. `launchToken` no longer
+creates 1-3 immediately-locked CLMM pools; it mints, opens *one*
+pre-market pool via `createPreMarketPool`, inserts a `premarket_pools`
+row, and lands the token at `status: 'premarket'` — not `'complete'`.
+Graduation (part 4) picks it up from there once depleted.
+
+**Real cost measured, not assumed.** `calculateLaunchFeeLamports`'s old
+per-pool constant was sized for a CLMM pool + lock, immediately, times N.
+Under this model the platform's real cost splits across two different
+times: `createPreMarketPool` now, once, regardless of `assetCount` — and
+`createCpmmPoolAndLock` later, at graduation, once *per* backing asset, on
+the platform's own wallet with nobody left to charge at that point.
+Measured both for real (diffing platform balance around each real call,
+same method the original constants were obtained with):
+`MEASURED_PREMARKET_POOL_LAMPORTS` = 168,571,960 lamports (~0.1686 SOL —
+coincidentally almost identical to the old per-pool figure, since it's the
+same createCustomizablePool + openPositionFromBase rent cost either way);
+`MEASURED_GRADUATION_PER_ASSET_LAMPORTS` = 200,512,760 lamports (~0.2005
+SOL, a bit more than CLMM's lock — CPMM's lock mints its own metadata
+NFT). The fee now folds `assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS`
+in up front, prefunding that later cost — same anti-spam-not-revenue
+principle as before, just accounting for cost that lands later instead of
+assuming it's zero because it isn't paid immediately.
+
+**Dead code removed, not left behind:** `createPoolAndPosition`
+(solana.mjs) and `calibratePool`/`splitSupplyEvenly` (calibration.mjs) —
+the old model's pool-creation and supply-split logic — had zero remaining
+callers once launch.mjs stopped using them, so they're gone rather than
+left as unreferenced cruft. `token_pools`/`getPoolPendingFees`/
+`harvestPoolFees`/CLMM lock-harvest code in rewards.mjs is *not* touched —
+still there for whatever the reward cron's still-pending CPMM adaptation
+needs to reference, and technically still correct for any legacy
+`token_pools` row (there happen to be none right now — the DB was wiped
+earlier in this project's mainnet transition).
+
+**First Buy: asked the user how to handle a real breaking change, rather
+than guessing.** The old First Buy was two creator-signed hops (SOL ->
+backing asset via Jupiter, then backing asset -> COIN via the pool that
+existed immediately) because pools only ever paired COIN against a
+backing asset. The pre-market pool pairs COIN directly against native
+SOL, so buying against it is inherently *one* hop — but the existing
+`buildFirstBuyTx` (solana.mjs) turned out to already be fully pool- and
+asset-agnostic (just `assetMint`/`poolId` parameters, no backing-asset-
+specific logic), so no new on-chain mechanism was needed, only a
+different caller. The blocker was that the old shape was 4 API routes
+(`hop1-tx`/`hop1`/`hop2-tx`/`hop2`) the frontend calls directly with two
+separate wallet signatures — collapsing that is a real frontend-visible
+break, which is exactly the kind of call that isn't this session's to
+make silently while "no UI work" is the standing instruction. Asked the
+user directly; they chose the clean break: new single-hop routes
+(`/api/launch/first-buy/tx` + `/api/launch/first-buy`), old ones removed
+outright rather than faked into a compatible-looking shape. **The
+frontend will not be able to complete a First Buy until it's updated to
+call the new routes with one signature instead of two** — a known,
+accepted gap from this decision, not an oversight; still explicitly no UI
+work happening in this pass.
+
+Side effect of the collapse: First Buy no longer depends on Jupiter at
+all, so — unlike the old hop 1 — it's no longer mainnet-only.
+
+`getLaunchConfig`'s `targetFdvUsd` still returns the old flat $5,000
+default rather than the pre-market pool's real pump.fun-anchored starting
+point (which floats with SOL's price, since it's pegged to a fixed SOL
+amount, not a fixed USD one) — left alone deliberately, since it only
+feeds a client-side *preview* number, not the enforced cap (that's always
+checked server-side against the real swap simulation, unaffected by this
+gap), and correcting it properly would mean changing what the API
+contract returns to the frontend, which is out of scope for this pass.
+
+**Verified end-to-end on devnet** using the real, unmodified public
+functions exactly as index.mjs's routes call them (`prepareFee` -> sign ->
+`launchToken` -> `prepareFirstBuy` -> sign -> `broadcastFirstBuy`), not a
+lower-level substitute: real fee computed (0.4274 SOL for 1 backing
+asset, matching the new formula), real mint, real pre-market pool created
+and correctly reflected in `premarket_pools`/`tokens.status`, a real 0.01
+SOL First Buy that landed real COIN in the creator's wallet
+(357,619.15 COIN) with `first_buy_lamports` persisted correctly, and a
+20-SOL over-cap attempt correctly rejected by `assertWithinFirstBuyCap`
+before any signable transaction was returned.
+
+**Still not done:** the frontend update First Buy now needs; adapting the
+reward cron to CPMM; standing up the graduation-cron Railway service.
+Frontend still out of scope per the user except for the First Buy route
+change flagged above, which they explicitly asked for.

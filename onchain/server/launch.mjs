@@ -2,14 +2,14 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
+import BN from 'bn.js';
 import {
   mintCoinToken,
-  createPoolAndPosition,
+  createPreMarketPool,
   buildFeeTx,
   broadcastFeeTx,
   broadcastSignedTx,
   buildFirstBuyTx,
-  getTokenBalance,
   calculateLaunchFeeLamports,
   redactSecrets,
   listFeeTierPercents,
@@ -17,10 +17,9 @@ import {
   TOTAL_SUPPLY_WHOLE,
   COIN_DECIMALS,
 } from './solana.mjs';
-import { getSwapQuote, buildSwapTx, SOL_MINT } from './jupiter.mjs';
+import { SOL_MINT } from './jupiter.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
-import { insertToken, insertPool, updateTokenStatus, updateFirstBuy, getToken } from './db.mjs';
-import { splitSupplyEvenly } from './calibration.mjs';
+import { insertToken, insertPremarketPool, updateTokenStatus, updateFirstBuy, getActivePremarketPool } from './db.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -58,24 +57,11 @@ const DEFAULT_TARGET_FDV_USD = 5000;
 
 export class LaunchValidationError extends Error {}
 
-// devnet stand-in assets have no real market, so calibration uses the
-// static usdPrice baked into backing-assets.json. mainnet-beta pairs
-// against real, moving markets — calibrating off a stale hardcoded number
-// would mis-price the pool and hand arbitrageurs the difference, so this
-// fetches a live price from the same Jupiter API the frontend already uses
-// for asset search, and refuses to launch if that fails rather than fall
-// back to a guess.
-async function resolveAssetUsdPrice(asset) {
-  if (CLUSTER !== 'mainnet-beta') return asset.usdPrice;
-  const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${asset.mint}`);
-  if (!res.ok) throw new LaunchValidationError(`could not fetch live price for ${asset.symbol}`);
-  const [token] = await res.json();
-  if (!token || typeof token.usdPrice !== 'number') {
-    throw new LaunchValidationError(`no live price available for ${asset.symbol}`);
-  }
-  return token.usdPrice;
-}
-
+// Still validated and stored at launch time even though the new pre-market
+// model doesn't touch a backing asset until graduation — the creator's
+// choice here is what graduation.mjs later splits the recovered SOL/COIN
+// across (see db.mjs tokens.backing_assets and docs/token-launch-plan.md
+// "Graduation").
 function assertAssets(assetSymbols) {
   if (!Array.isArray(assetSymbols) || assetSymbols.length < 1 || assetSymbols.length > MAX_ASSETS) {
     throw new LaunchValidationError(`pick 1-${MAX_ASSETS} backing assets`);
@@ -88,9 +74,10 @@ function assertAssets(assetSymbols) {
 }
 
 // Step 1: build the launch fee transfer (creator -> platform, sized to the
-// real cost of minting + N pools, see calculateLaunchFeeLamports). This is
-// the only thing the creator ever signs — everything downstream is
-// platform-sponsored and platform-signed.
+// real cost of minting + the pre-market pool + N backing assets' worth of
+// graduation cost, see calculateLaunchFeeLamports). This is the only thing
+// the creator ever signs — everything downstream is platform-sponsored and
+// platform-signed.
 export function prepareFee({ creatorWallet, assetSymbols }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
   assertAssets(assetSymbols);
@@ -104,7 +91,12 @@ export function prepareFee({ creatorWallet, assetSymbols }) {
 
 // Step 2: broadcast the creator-signed fee tx, confirm it landed (that
 // confirmation is itself the proof the creator paid — see solana.mjs), then
-// run the platform-sponsored mint + pool creation exactly as before.
+// mint the coin and open its pre-market position, platform-sponsored. Unlike
+// the old model, this does *not* create the launch's real final pools —
+// those don't exist until graduation (see graduation.mjs), once the
+// pre-market position sells through. A token sits in 'premarket' status,
+// already genuinely tradeable (it's a real Raydium pool from the moment
+// this lands), until that happens.
 export async function launchToken({
   name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64,
   xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
@@ -118,7 +110,7 @@ export async function launchToken({
   if (Buffer.byteLength(name, 'utf8') > 32) throw new LaunchValidationError('name is too long for on-chain metadata (max 32 bytes)');
   if (Buffer.byteLength(ticker, 'utf8') > 10) throw new LaunchValidationError('ticker is too long for on-chain metadata (max 10 bytes)');
   if (!signedFeeTxBase64) throw new LaunchValidationError('launch fee payment is required');
-  const assets = assertAssets(assetSymbols);
+  assertAssets(assetSymbols);
 
   try {
     await broadcastFeeTx(signedFeeTxBase64);
@@ -145,49 +137,23 @@ export async function launchToken({
   // db.mjs status/error_message columns).
   const { mint } = await mintCoinToken({ name, symbol: ticker, metadataUri });
   insertToken({
-    mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'pools_pending',
-    xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
+    mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'minting',
+    xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets: assetSymbols,
   });
 
-  // The pool's on-chain trading fee is snapped to whichever published
-  // Raydium tier is closest to the reward model's total cut — custom rates
-  // aren't possible (create_amm_config is admin-gated on Raydium's own
-  // program), so this is the nearest approximation, not an exact match. See
-  // solana.mjs pickAmmConfig.
-  const totalRewardFeePercent = (communityFee || 0) + (creatorFee || 0) + (buybackFee || 0);
-
   try {
-    const shares = splitSupplyEvenly(1_000_000_000n, assets.length);
-    const pools = [];
-    for (let i = 0; i < assets.length; i++) {
-      const asset = assets[i];
-      const usdPrice = await resolveAssetUsdPrice(asset);
-      const result = await createPoolAndPosition({
-        coinMint: mint,
-        asset: { ...asset, usdPrice },
-        targetFdvUsd: DEFAULT_TARGET_FDV_USD,
-        coinShareWhole: shares[i],
-        totalRewardFeePercent,
-      });
-
-      insertPool({
-        id: randomUUID(),
-        mintAddress: mint,
-        backingAsset: asset.symbol,
-        backingAssetMint: asset.mint,
-        poolAddress: result.poolId,
-        positionNftMint: result.positionNftMint,
-        lockNftMint: result.lockNftMint,
-        tickLower: result.tickLower,
-        tickUpper: result.tickUpper,
-        initialPrice: result.startPrice,
-      });
-
-      pools.push({ asset: asset.symbol, ...result });
-    }
-
-    updateTokenStatus(mint, 'complete');
-    return { mint, imageUrl, metadataUri, pools };
+    const pool = await createPreMarketPool({ coinMint: mint });
+    insertPremarketPool({
+      id: randomUUID(),
+      mintAddress: mint,
+      poolAddress: pool.poolId,
+      positionNftMint: pool.positionNftMint,
+      tickLower: pool.tickLower,
+      tickUpper: pool.tickUpper,
+      initialPrice: pool.startPrice,
+    });
+    updateTokenStatus(mint, 'premarket');
+    return { mint, imageUrl, metadataUri, pool };
   } catch (err) {
     updateTokenStatus(mint, 'failed', err.message);
     throw err;
@@ -200,10 +166,9 @@ export function listBackingAssets() {
 
 // A creator buying up a big chunk of supply for themselves right at launch
 // looks like a rug-pull setup regardless of intent — cap First Buy so it
-// can never land more than this fraction of total supply. Enforced twice:
-// a cheap pre-swap estimate before hop 1 (so a doomed buy doesn't waste the
-// creator's SOL on the first hop), and precisely against the real swap
-// simulation before hop 2 hands back a signable transaction.
+// can never land more than this fraction of total supply. Enforced against
+// the real swap simulation before a signable transaction ever goes back to
+// the client (see prepareFirstBuy).
 const FIRST_BUY_MAX_SUPPLY_FRACTION = 0.1;
 
 function maxFirstBuyCoinAtomic() {
@@ -218,13 +183,6 @@ function assertWithinFirstBuyCap(coinAmountAtomic) {
   }
 }
 
-async function fetchSolUsdPrice() {
-  const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${SOL_MINT}`);
-  if (!res.ok) return null;
-  const [token] = await res.json();
-  return token && typeof token.usdPrice === 'number' ? token.usdPrice : null;
-}
-
 // Economics the frontend needs to estimate a First Buy's COIN payout before
 // the coin (and its pool) even exists — every launch starts at the same
 // targetFdvUsd / totalSupplyWhole price, so this is enough for a rough
@@ -237,101 +195,51 @@ export function getLaunchConfig() {
     maxFirstBuySupplyFraction: FIRST_BUY_MAX_SUPPLY_FRACTION,
     // The reward model's total fee is a choice among these, not a free
     // slider — anything else can't map onto a real pool (see solana.mjs
-    // pickAmmConfig/listFeeTierPercents). Always mainnet's tiers capped at
-    // 3% (the reward model's original ceiling), regardless of which
-    // cluster is actually live right now — devnet's own tier list tops out
-    // at 0.25%, far too narrow a range for creators to configure a
+    // pickAmmConfig/pickCpmmConfig/listFeeTierPercents). Always mainnet's
+    // tiers capped at 3% (the reward model's original ceiling), regardless
+    // of which cluster is actually live right now — devnet's own tier list
+    // tops out at 0.25%, far too narrow a range for creators to configure a
     // meaningful split against.
     feeTiers: listFeeTierPercents({ cluster: 'mainnet-beta', maxPercent: 3 }),
   };
 }
 
 // First Buy: optional, creator-signed, lands COIN in the creator's own
-// wallet — never the platform's. Our pools only pair COIN against
-// xSOL/xBTC/xHYPE, not native SOL, so this is unavoidably two hops:
-//   1. SOL -> backing asset, via Jupiter (mainnet-only — Jupiter doesn't
-//      route devnet tokens, so First Buy simply isn't available there).
-//   2. backing asset -> COIN, via the pool this launch just created.
-// Two separate creator signatures rather than one combined transaction —
-// composing Jupiter's returned instructions with our own Raydium swap in a
-// single versioned tx (shared address-lookup-tables, exact accounts) is
-// real complexity for a UX win (one popup instead of two) on a feature
-// that's opt-in to begin with. Each hop reuses the same
-// prepare-unsigned-tx -> sign -> broadcast pattern as the launch fee.
-function firstBuyPool(mint) {
-  const token = getToken(mint);
-  if (!token || !token.pools.length) throw new LaunchValidationError('unknown or incomplete launch');
-  return token.pools[0]; // whichever backing asset was picked first
+// wallet — never the platform's. Under the old model this needed two hops
+// (pools only paired COIN against a backing asset, so buying required
+// SOL -> asset via Jupiter, then asset -> COIN via the pool). The
+// pre-market pool pairs COIN directly against native SOL, so this is now a
+// single hop straight through it, with no Jupiter dependency at all —
+// which also means, unlike the old hop 1, this isn't mainnet-only anymore.
+function activePremarketPool(mint) {
+  const pool = getActivePremarketPool(mint);
+  if (!pool) throw new LaunchValidationError('unknown or incomplete launch — no active pre-market pool to buy against');
+  return pool;
 }
 
-export async function prepareFirstBuyHop1({ mint, buyerWallet, solLamports }) {
-  if (CLUSTER !== 'mainnet-beta') {
-    throw new LaunchValidationError('First Buy needs mainnet — Jupiter has no devnet liquidity to route through');
-  }
+export async function prepareFirstBuy({ mint, buyerWallet, solLamports }) {
   if (!buyerWallet) throw new LaunchValidationError('connect a wallet before buying');
   if (!solLamports || solLamports <= 0) throw new LaunchValidationError('invalid first-buy amount');
 
-  const pool = firstBuyPool(mint);
-
-  // Rough pre-check before spending anything: if the SOL amount already
-  // clearly implies more than the cap at the flat starting price, reject
-  // now rather than let hop 1 burn real SOL on a buy hop 2 will refuse
-  // anyway. Not authoritative — skipped (not blocked) if the price lookup
-  // fails, since the precise, real check happens at hop 2 regardless.
-  const solPrice = await fetchSolUsdPrice();
-  if (solPrice) {
-    const coinStartPriceUsd = DEFAULT_TARGET_FDV_USD / Number(TOTAL_SUPPLY_WHOLE);
-    const estimatedCoins = ((solLamports / 1e9) * solPrice) / coinStartPriceUsd;
-    if (estimatedCoins > Number(TOTAL_SUPPLY_WHOLE) * FIRST_BUY_MAX_SUPPLY_FRACTION) {
-      throw new LaunchValidationError(
-        `First Buy is capped at ${FIRST_BUY_MAX_SUPPLY_FRACTION * 100}% of total supply — try a smaller amount`
-      );
-    }
-  }
-
-  const quote = await getSwapQuote({ inputMint: SOL_MINT, outputMint: pool.backing_asset_mint, amountLamports: solLamports });
-  const txBase64 = await buildSwapTx({ quoteResponse: quote, userPublicKey: buyerWallet });
-  return { txBase64, cluster: CLUSTER };
-}
-
-export function broadcastFirstBuyHop1({ signedTxBase64 }) {
-  if (!signedTxBase64) throw new LaunchValidationError('signed transaction is required');
-  return broadcastSignedTx(signedTxBase64, 'first-buy swap (hop 1)').then((txId) => ({ txId }));
-}
-
-export async function prepareFirstBuyHop2({ mint, buyerWallet }) {
-  // No CLUSTER gate here — unlike hop 1, this is pure Raydium pool
-  // interaction with no Jupiter dependency, so it's cluster-agnostic. In
-  // the normal flow it's only ever reached after hop 1 succeeds (which
-  // *is* mainnet-gated), but that's a frontend sequencing fact, not
-  // something this function needs to assume.
-  if (!buyerWallet) throw new LaunchValidationError('connect a wallet before buying');
-
-  const pool = firstBuyPool(mint);
-  // Spend whatever hop 1 actually delivered, not the pre-swap quote's
-  // estimate — reading the real post-hop-1 balance means hop 2 can never
-  // ask for more than the wallet actually holds.
-  const amountIn = await getTokenBalance(buyerWallet, pool.backing_asset_mint);
-  if (amountIn.isZero()) throw new LaunchValidationError('no balance to buy with — did the first swap land?');
-
+  const pool = activePremarketPool(mint);
   const result = await buildFirstBuyTx({
     poolId: pool.pool_address,
     coinMint: mint,
-    assetMint: pool.backing_asset_mint,
+    assetMint: SOL_MINT,
     buyerWallet,
-    amountIn,
+    amountIn: new BN(solLamports),
   });
-  // Precise this time — checked against the swap simulation's own output
-  // estimate, which reflects this pool's real current price and liquidity,
-  // not a pre-swap guess. Rejected here, before a signable transaction ever
-  // goes back to the client.
+  // Precise — checked against the swap simulation's own output estimate,
+  // which reflects this pool's real current price and liquidity, not a
+  // pre-swap guess. Rejected here, before a signable transaction ever goes
+  // back to the client.
   assertWithinFirstBuyCap(BigInt(result.coinAmountOut));
   return { txBase64: result.txBase64, cluster: CLUSTER };
 }
 
-export async function broadcastFirstBuyHop2({ mint, signedTxBase64, solLamportsSpent }) {
+export async function broadcastFirstBuy({ mint, signedTxBase64, solLamportsSpent }) {
   if (!signedTxBase64) throw new LaunchValidationError('signed transaction is required');
-  const txId = await broadcastSignedTx(signedTxBase64, 'first-buy swap (hop 2)');
+  const txId = await broadcastSignedTx(signedTxBase64, 'first-buy swap');
   updateFirstBuy(mint, solLamportsSpent ?? null);
   return { txId };
 }

@@ -49,7 +49,7 @@ import bs58 from 'bs58';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { isCoinMintA, calibratePool, calibratePreMarketPool, toAtomicUnits, PREMARKET_CURVE_COIN_WHOLE } from './calibration.mjs';
+import { isCoinMintA, calibratePreMarketPool } from './calibration.mjs';
 import { SOL_MINT, getSwapQuote, buildSwapTx } from './jupiter.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -224,15 +224,26 @@ export const TOTAL_SUPPLY_WHOLE = 1_000_000_000n;
 // Launch fee, paid by the creator directly to the platform wallet in a
 // single transfer *before* the platform mints anything. Sized off real
 // measured costs (see docs/token-launch-plan.md "Anti-spam fee") — mint is
-// nearly free, each pool (createPool + openPositionFromBase: pool state, 2
-// vaults, tick arrays, position NFT) is the real cost — with a safety
-// margin so the platform never operates at a loss on rent-price drift.
+// nearly free, pool creation is the real cost, with a safety margin so the
+// platform never operates at a loss on rent-price drift.
+//
+// Under the pre-market/graduation model (see docs/token-launch-plan.md
+// "Graduation") the platform's real cost is split across two very
+// different times: createPreMarketPool happens right now, once, regardless
+// of how many backing assets the creator picked — but createCpmmPoolAndLock
+// happens later, at graduation, once *per* backing asset, on the
+// platform's own wallet with no one left to charge at that point. Folding
+// assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS into the fee here
+// prefunds that future cost up front, the same anti-spam-not-revenue
+// principle as before, just accounting for cost that lands later instead
+// of assuming it's zero because it isn't paid immediately.
 const MEASURED_MINT_LAMPORTS = 2_575_000; // ~0.0026 SOL observed
-const MEASURED_PER_POOL_LAMPORTS = 168_572_000; // ~0.1686 SOL observed, per pool
+const MEASURED_PREMARKET_POOL_LAMPORTS = 168_572_000; // ~0.1686 SOL observed, createPreMarketPool (one-time, any assetCount)
+const MEASURED_GRADUATION_PER_ASSET_LAMPORTS = 200_513_000; // ~0.2005 SOL observed, createCpmmPoolAndLock, per backing asset
 const FEE_SAFETY_MARGIN = 1.15; // +15% buffer over the raw measured cost
 
 export function calculateLaunchFeeLamports(assetCount) {
-  const raw = MEASURED_MINT_LAMPORTS + assetCount * MEASURED_PER_POOL_LAMPORTS;
+  const raw = MEASURED_MINT_LAMPORTS + MEASURED_PREMARKET_POOL_LAMPORTS + assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS;
   return Math.ceil(raw * FEE_SAFETY_MARGIN);
 }
 
@@ -351,7 +362,8 @@ export function broadcastFeeTx(signedTxBase64) {
 }
 
 // Mints the coin, platform wallet pays rent + holds the full initial supply
-// until it's distributed into pools by createPoolAndPosition. Also creates
+// until it's distributed into a pool by createPreMarketPool (and, later,
+// createCpmmPoolAndLock at graduation). Also creates
 // its on-chain Metaplex metadata (name/symbol/uri — without this, wallets
 // and explorers show the coin as an unnamed token) and immediately locks
 // down both authorities a launch platform shouldn't be trusted to hold
@@ -430,122 +442,15 @@ export async function mintCoinToken({ name, symbol, metadataUri }) {
   return { mint: mint.toBase58(), ata: ata.toBase58(), metadata: metadataPda.toBase58() };
 }
 
-// Creates one CLMM pool for `coinMint` paired with `asset`, calibrated to
-// targetFdvUsd, and opens a single-sided (100% COIN) position sized to
-// coinShareWhole. Platform wallet pays all rent and provides all liquidity.
-export async function createPoolAndPosition({ coinMint, asset, targetFdvUsd, coinShareWhole, totalRewardFeePercent }) {
-  const raydium = await getRaydium();
-  const connection = getConnection();
-  const payer = getPlatformWallet();
-  const coinIsMintA = isCoinMintA(coinMint, asset.mint);
-
-  // Snapped to the nearest tier Raydium actually publishes — see
-  // pickAmmConfig's own comment for why it can't be exact.
-  const ammConfig = pickAmmConfig(totalRewardFeePercent);
-
-  const coinShareAtomic = toAtomicUnits(coinShareWhole, COIN_DECIMALS);
-  const { tickLower, tickUpper, base, startPrice } = calibratePool({
-    coinIsMintA,
-    coinDecimals: COIN_DECIMALS,
-    assetDecimals: asset.decimals,
-    assetUsdPrice: asset.usdPrice,
-    targetFdvUsd,
-    totalSupplyWhole: TOTAL_SUPPLY_WHOLE,
-    coinShareAtomic,
-    tickSpacing: ammConfig.tickSpacing,
-  });
-
-  const coinToken = toApiV3Token(coinMint, COIN_DECIMALS, 'COIN');
-  const assetToken = toApiV3Token(asset.mint, asset.decimals, asset.symbol);
-
-  // createCustomizablePool instead of the plain createPool so fees can be
-  // pinned to the backing asset (collectFeeOnMint) instead of accruing
-  // split across both tokens depending on swap direction — the backing
-  // asset is the liquid, useful-to-holders side; COIN itself is what a
-  // future Buyback & Burn step would need to swap into anyway, so there's
-  // no benefit to collecting fees in COIN before that step exists.
-  const { execute: executeCreate, extInfo: createExtInfo } = await raydium.clmm.createCustomizablePool({
-    programId: CLMM_PROGRAM_ID_FOR_CLUSTER,
-    mint1: coinIsMintA ? coinToken : assetToken,
-    mint2: coinIsMintA ? assetToken : coinToken,
-    ammConfig,
-    initialPrice: startPrice,
-    collectFeeOnMint: new PublicKey(asset.mint),
-    txVersion: TxVersion.V0,
-  });
-  const createResult = await executeCreate({ sendAndConfirm: true });
-
-  const mockPoolInfo = createExtInfo.mockPoolInfo;
-  const poolKeys = createExtInfo.address;
-  const rawPoolId = poolKeys.id ?? poolKeys.poolId;
-  const poolId = typeof rawPoolId === 'string' ? rawPoolId : rawPoolId.toBase58();
-
-  const { execute: executeOpen, extInfo: openExtInfo } = await raydium.clmm.openPositionFromBase({
-    poolInfo: mockPoolInfo,
-    poolKeys,
-    ownerInfo: { useSOLBalance: true },
-    tickLower,
-    tickUpper,
-    base,
-    baseAmount: coinShareAtomic,
-    // Should be 0 for a genuinely single-sided position, but fixed-point
-    // sqrt-price rounding can require a few atomic units on the "other"
-    // side depending on price magnitude — 0 tolerance intermittently fails
-    // (seen: Raydium CLMM custom error 6017) on some assets. A small buffer
-    // costs nothing economically and absorbs the rounding. Platform wallet
-    // needs a small pre-funded balance of each backing asset to cover it
-    // (see server/setup-backing-assets.mjs).
-    otherAmountMax: new BN(1000),
-    txVersion: TxVersion.V0,
-  });
-  const openResult = await executeOpen({ sendAndConfirm: true });
-  const positionNftMint = openExtInfo.nftMint;
-
-  // Locked immediately via Raydium's own Lock CL Position program — *not*
-  // burned. A burn permanently forfeits this position's accrued trading
-  // fees too (decreaseLiquidity is CLMM's only fee-harvesting path, and it
-  // requires presenting the position NFT, burned or not), which would
-  // also foreclose the Reward Model's fee collection forever. lockPosition
-  // gives the same "can never be withdrawn, by anyone, including the
-  // platform" guarantee while leaving harvestLockPosition available to
-  // collect fees from the locked position later. Needs the position
-  // account to actually exist on-chain first (Raydium decodes it from a
-  // fresh RPC read), so unlike the mint step this can't be one transaction
-  // with openPositionFromBase — see docs/token-launch-plan.md.
-  const positionPda = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID_FOR_CLUSTER, positionNftMint).publicKey;
-  const positionAccountInfo = await connection.getAccountInfo(positionPda);
-  const ownerPosition = PersonalPositionLayout.decode(positionAccountInfo.data);
-
-  const { execute: executeLock, extInfo: lockExtInfo } = await raydium.clmm.lockPosition({
-    programId: CLMM_LOCK_PROGRAM_ID_FOR_CLUSTER,
-    authProgramId: CLMM_LOCK_AUTH_ID_FOR_CLUSTER,
-    poolProgramId: CLMM_PROGRAM_ID_FOR_CLUSTER,
-    ownerPosition,
-    txVersion: TxVersion.V0,
-  });
-  const lockResult = await executeLock({ sendAndConfirm: true });
-
-  return {
-    poolId,
-    positionNftMint: positionNftMint.toBase58(),
-    lockNftMint: lockExtInfo.lockNftMint.toBase58(),
-    tickLower,
-    tickUpper,
-    startPrice: startPrice.toString(),
-    createTx: createResult?.txId ?? String(createResult),
-    openTx: openResult?.txId ?? String(openResult),
-    lockTx: lockResult?.txId ?? String(lockResult),
-  };
-}
-
 // Pre-market pool: a single-sided COIN/SOL position sized (see
 // calibration.mjs calibratePreMarketPool) so that fully depleting it raises
 // ~85 SOL — pump.fun's own graduation target, replicated here so a launch
 // feels the same to trade against even though the mechanics underneath
 // (a real CLMM range, not a virtual-reserve curve) are different.
 //
-// Deliberately left *unlocked*, unlike createPoolAndPosition's final pools
-// — graduation (see closePreMarketPool below) has to be able to close
+// Deliberately left *unlocked*, unlike the final CPMM pools graduation
+// creates (createCpmmPoolAndLock) — graduation (see closePreMarketPool
+// below) has to be able to close
 // this position and withdraw the real SOL it collected, which Raydium's
 // Lock CL Position program exists specifically to make impossible. The
 // position NFT sits in the platform wallet's own ATA in the meantime, the
@@ -596,7 +501,11 @@ export async function createPreMarketPool({ coinMint }) {
     tickUpper,
     base,
     baseAmount: coinShareAtomic,
-    otherAmountMax: new BN(1000), // same rounding buffer as createPoolAndPosition
+    // Should be 0 for a genuinely single-sided position, but fixed-point
+    // sqrt-price rounding can require a few atomic units on the "other"
+    // side depending on price magnitude — a small buffer costs nothing
+    // economically and absorbs the rounding.
+    otherAmountMax: new BN(1000),
     txVersion: TxVersion.V0,
   });
   const openResult = await executeOpen({ sendAndConfirm: true });
@@ -910,8 +819,9 @@ export async function getPoolPendingFees({ poolAddress, positionNftMint, tickLow
 
   const { tokenFeeAmountA, tokenFeeAmountB } = PositionUtils.GetPositionFees(poolState, positionState, tickLowerData, tickUpperData);
 
-  // feeOn pins collection to the backing asset (see createPoolAndPosition),
-  // so the COIN side should read ~0 regardless — read both and pick
+  // feeOn pins collection to the backing asset (the old model's pools were
+  // created with collectFeeOnMint set to it), so the COIN side should read
+  // ~0 regardless — read both and pick
   // whichever side actually matches the backing asset's mint rather than
   // assuming, so this stays correct if that ever changes.
   const coinIsA = poolState.mintA.toBase58() === coinMint;

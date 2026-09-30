@@ -1738,3 +1738,44 @@ graduation feature described in this doc (pre-market pool, closing it,
 splitting into final CPMM pools, the depletion cron, launch.mjs, and now
 the reward cron) is built and individually verified on devnet. Frontend
 still out of scope per the user throughout.
+
+## Graduation, part 7: First Buy frontend updated to the new single hop (2026-09-30)
+
+The user explicitly asked for this one piece of UI work — the First Buy
+route change from part 5 otherwise left the feature dead in the browser.
+`performFirstBuy` (index.html) collapsed from the old two-hop chain
+(`hop1-tx` → sign → `hop1` → `hop2-tx` → sign → `hop2`) to a single
+`first-buy/tx` → sign → `first-buy` call, using the same generic
+`signAndBroadcast` helper the old code already had (no changes needed
+there — it was already hop-agnostic). The "two hops" doc comment moved
+from `signAndBroadcast` (where it was only ever loosely attached) to
+`performFirstBuy` itself, and rewritten for the new single-hop reality.
+The estimate function's "haircut for two pool-fee hops" comment was
+similarly stale (one hop now) — reworded, math unchanged (still a rough
+`* 0.99`, since the real cap is always enforced server-side against a
+real swap simulation regardless of what this estimate shows).
+
+`getLaunchConfig`'s `targetFdvUsd` still isn't touched (see part 5's own
+note on this — cosmetic gap, not a correctness one), so the estimate
+number itself is unchanged in magnitude; only the mechanism connecting it
+to on-chain reality changed.
+
+**Verified in a real headless browser** (Playwright, against the actual
+page served by a local instance of index.mjs on devnet — not a
+hand-rolled substitute), since a full real-wallet-signature test isn't
+possible without a real wallet extension: loaded `/app` (not `/`
+— the landing/app screen split needed a real path, not just
+`showAppPage`, to make the page's own boot logic reveal the app shell),
+opened the First Buy panel, typed an amount and confirmed the live
+estimate renders, then filled out and submitted the *real* launch form
+(name, ticker, a real uploaded image, XSOL selected) with a mocked
+wallet-signing feature and a mocked `fetch` recording every call. The
+real submit handler's real call sequence was captured and confirmed
+exactly: `/api/launch/fee-tx` → `/api/launch` → `/api/launch/first-buy/tx`
+→ `/api/launch/first-buy` → `/api/tokens` — no `hop1`/`hop2` path
+anywhere, and zero console/page errors throughout.
+
+**Still not done:** standing up the graduation-cron Railway service
+(manual dashboard step, not a code change — see part 4). With First Buy's
+frontend now caught up, there is no other known gap between the backend
+graduation feature and the live site.

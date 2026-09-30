@@ -4043,9 +4043,10 @@
           }
           var coinStartPriceUsd = config.targetFdvUsd / config.totalSupplyWhole;
           var usdValue = amount * solPrice;
-          // Rough haircut for the two pool-fee hops (SOL -> asset,
-          // asset -> COIN) — the real amount also depends on live slippage
-          // at swap time, so this stays an estimate, not a quote.
+          // Rough haircut for the pool's trading fee — the real amount also
+          // depends on live slippage at swap time, so this stays an
+          // estimate, not a quote (the real cap is enforced server-side
+          // against the actual swap simulation regardless).
           var estimatedCoins = (usdValue / coinStartPriceUsd) * 0.99;
           var maxCoins = config.totalSupplyWhole * config.maxFirstBuySupplyFraction;
           if (estimatedCoins > maxCoins) {
@@ -4176,14 +4177,6 @@
         });
       }
 
-      // First Buy (optional): two creator-signed hops so the resulting COIN
-      // lands in the creator's own wallet, never the platform's — our pools
-      // pair COIN against xSOL/xBTC/xHYPE, not native SOL, so getting there
-      // from a SOL amount always takes two swaps:
-      //   1. SOL -> backing asset, via Jupiter (mainnet-only).
-      //   2. backing asset -> COIN, via the pool /api/launch just created.
-      // Failure here never undoes the launch itself, which already
-      // succeeded — see the submit handler's separate catch for this step.
       function signAndBroadcast(prepareResult, broadcastPath, extraBody) {
         var wallet = window.__perpsideConnectedWallet;
         var account = window.__perpsideConnectedAccount;
@@ -4202,20 +4195,19 @@
         });
       }
 
+      // First Buy (optional): one creator-signed swap straight through the
+      // pre-market pool /api/launch just opened — that pool pairs COIN
+      // directly against native SOL, so getting there from a SOL amount
+      // takes a single hop now, no Jupiter involved. Failure here never
+      // undoes the launch itself, which already succeeded — see the submit
+      // handler's separate catch for this step.
       function performFirstBuy(creatorWallet, mint, solAmount) {
         var solLamports = Math.round(solAmount * 1e9);
 
-        if (submitLabel) submitLabel.textContent = 'First buy — swap 1 of 2…';
-        return apiCall('/api/launch/first-buy/hop1-tx', { mint: mint, buyerWallet: creatorWallet, solLamports: solLamports })
-          .then(function (hop1) {
-            return signAndBroadcast(hop1, '/api/launch/first-buy/hop1', {});
-          })
-          .then(function () {
-            if (submitLabel) submitLabel.textContent = 'First buy — swap 2 of 2…';
-            return apiCall('/api/launch/first-buy/hop2-tx', { mint: mint, buyerWallet: creatorWallet });
-          })
-          .then(function (hop2) {
-            return signAndBroadcast(hop2, '/api/launch/first-buy/hop2', { mint: mint, solLamportsSpent: solLamports });
+        if (submitLabel) submitLabel.textContent = 'Confirm First Buy in wallet…';
+        return apiCall('/api/launch/first-buy/tx', { mint: mint, buyerWallet: creatorWallet, solLamports: solLamports })
+          .then(function (prepared) {
+            return signAndBroadcast(prepared, '/api/launch/first-buy', { mint: mint, solLamportsSpent: solLamports });
           });
       }
 

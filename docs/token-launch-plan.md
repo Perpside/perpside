@@ -1856,3 +1856,95 @@ for real against production with `PERPSIDE_INTERNAL_URL` overridden to
 port 8080, both completing cleanly. `cron-trigger.mjs`'s default updated
 to port 8080 accordingly, with `PERPSIDE_INTERNAL_URL` kept as an escape
 hatch if this value ever changes again.
+
+## Graduation, part 9: real-time depletion detection (2026-09-30)
+
+graduation-cron's 10-minute cadence meant a pool that fully depleted
+could sit un-graduated for up to 10 minutes. Asked the user how "instant"
+should actually work, since depleting trades aren't limited to our own
+First Buy — the pre-market pool is a real public Raydium pool, so most
+depleting trades will come through Raydium's own UI or Jupiter, which our
+server only ever learns about by watching the chain itself (polling or a
+live subscription — there's no webhook Raydium/Jupiter calls us on).
+User chose a live subscription over just polling more often.
+
+**pool-watcher.mjs (new)**, run once from index.mjs at startup inside the
+always-on `perpside` process (a cron service has no persistent container
+to hold a live connection open — this has to live where the always-on
+service already does): `connection.onAccountChange` on each active
+pre-market pool's own account. The callback decodes the pushed bytes
+directly and reuses the exact same tick-boundary comparison
+`isPreMarketPoolDepleted` already used — pulled out into a shared
+`solana.mjs` export, `isPoolDataDepleted(accountData, {...})`, so the
+RPC-polling path and the WebSocket-push path can't drift into checking
+depletion two different ways. On a real depletion, it calls a new
+`graduation.mjs` export, `triggerGraduationCheck(mintAddress)` — fetches
+the token fresh (time has passed since the notification arrived) and
+runs the same `processToken` the cron uses, so there's exactly one
+graduation code path regardless of which trigger caught it.
+
+**New launches subscribe immediately**: `launch.mjs` calls
+`watchPremarketPool(...)` right after `createPreMarketPool` succeeds, so
+a freshly-launched token doesn't wait for the next watcher restart to be
+covered. **graduation-cron keeps running unchanged** as a safety net — if
+this process restarts, a subscription is missed, or the RPC websocket
+silently drops (web3.js reconnects its own client automatically, but
+"automatically" isn't something to stake the whole feature on), the next
+cron tick still catches anything the watcher missed within its own
+10-minute cadence. A depleted pool that failed to fully graduate (e.g.
+the asset swap failing) also naturally stops being watched once the
+token's status moves off `'premarket'` — `handleAccountChange` checks
+this after each trigger and unsubscribes if so, re-subscribing never
+needed since `graduation_runs`/cron resumability (part 3) picks it up
+from there.
+
+Real coin-mint circularity, resolved deliberately rather than avoided:
+`launch.mjs` → `pool-watcher.mjs` → `graduation.mjs` → `launch.mjs` (the
+last hop is `graduation.mjs`'s existing `listBackingAssets` import).
+Confirmed safe rather than assumed — every cross-reference is only ever
+called from inside a function body, never at module-evaluation time, and
+a direct import test resolved every binding to a real function, not
+`undefined`.
+
+**A real, unrelated testing-methodology bug surfaced and fixed while
+verifying this**: every throwaway `_test-*.mjs` script this whole session
+that set `process.env.DB_PATH = '...'` as its *first line*, before its
+own `import` statements, was not actually doing what it looked like — ES
+modules hoist every static `import` above a file's own top-level
+statements regardless of where they're textually written, so db.mjs's
+module-level `new DatabaseSync(...)` had already run (and silently fallen
+back to its own default path) before that assignment ever executed every
+single time. Every such test was actually sharing and accumulating state
+in one real local file (`onchain/server/perpside.db`, gitignored, now
+deleted) instead of an isolated scratch DB — caught for real only once a
+test reused a hardcoded id and hit a genuine `UNIQUE constraint failed`
+against leftover data from an earlier run. Doesn't appear to have produced
+a false pass anywhere else (every other test used fresh random mint
+addresses, so collisions were never silently possible), but worth being
+honest about rather than quietly fixing and moving on. Fixed going
+forward by requiring `DB_PATH` as a real shell environment variable
+instead (`DB_PATH=/tmp/x.db node script.mjs`), which isn't subject to
+import hoisting.
+
+**Verified end-to-end on real devnet, organically — no manufactured DB
+state for the trigger this time** (part 4's graduation-cron test had to
+manufacture the "already depleted" state because organically depleting a
+real 85-SOL range wasn't practical; this test went further): built a
+small real pre-market pool, subscribed the watcher to it for real,
+confirmed the subscription fires on genuine account changes via three
+separate real partial swaps (each correctly read `depleted=false`, no
+false positive), then closed the exact remaining gap adaptively — reading
+real on-chain `tickCurrent`/liquidity fresh before each step and
+recomputing the exact delta via the SDK's own liquidity math, since CLMM
+swaps here don't partial-fill (requesting even slightly more than a
+range can supply throws a real `LiquidityInsufficient`, confirmed by
+hitting it repeatedly with a naively precomputed fixed target before
+switching to this adaptive approach) — until the closing swap genuinely
+crossed the boundary. The watcher caught it live: `depleted=true` logged,
+`triggerGraduationCheck` fired, the token's status flipped from
+`premarket` to `graduating` with a real `graduation_runs` row created —
+all without `runGraduationCycle` or any cron ever being called anywhere
+in the test.
+
+**Still not done:** nothing known — this was the last piece. Frontend
+still out of scope per the user throughout this whole feature.

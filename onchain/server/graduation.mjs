@@ -14,6 +14,7 @@ import { listBackingAssets } from './launch.mjs';
 import {
   listPremarketTokens,
   listGraduatingTokens,
+  getPremarketToken,
   getIncompleteGraduationRun,
   createGraduationRun,
   markGraduationRunClosed,
@@ -170,6 +171,25 @@ async function processToken(token) {
     updateTokenStatus(token.mint_address, 'complete');
   } else if (settledRows.some((r) => r.status === 'failed')) {
     updateGraduationRunStatus(run.id, 'failed', 'one or more backing assets failed — see graduation_run_assets, retried automatically next cycle');
+  }
+}
+
+// Entry point for pool-watcher.mjs's real-time account-change subscription
+// — a trade the watcher just saw looked like it depleted the pool, so
+// check this one token right now rather than waiting for the next cron
+// tick. Re-fetches the token fresh from the DB rather than trusting
+// whatever the caller already had, since some time (a whole RPC round
+// trip, at minimum) passes between "a change notification arrived" and
+// here. Swallows its own errors — same as runGraduationCycle's per-token
+// catch — so a bad trigger can't crash the long-lived watcher process;
+// the cron safety net picks up anything this misses.
+export async function triggerGraduationCheck(mintAddress) {
+  const token = getPremarketToken(mintAddress);
+  if (!token) return; // already past premarket (graduating/complete) or unknown — nothing to do
+  try {
+    await processToken(token);
+  } catch (err) {
+    console.error(`graduation check failed for ${mintAddress}:`, err.message);
   }
 }
 

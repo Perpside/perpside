@@ -15,6 +15,7 @@ import {
 import { listTokens, getToken, getTokenRewardTotals } from './db.mjs';
 import { runRewardCycle } from './rewards.mjs';
 import { runGraduationCycle } from './graduation.mjs';
+import { startPoolWatcher } from './pool-watcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..', '..');
@@ -149,3 +150,9 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`perpside launch service listening on :${port}`);
 });
+
+// Real-time graduation trigger — see pool-watcher.mjs. Started after
+// app.listen rather than before: the HTTP server coming up doesn't depend
+// on this, and startPoolWatcher's own DB read/RPC subscriptions have no
+// reason to hold up serving traffic if they're slow on a cold start.
+startPoolWatcher();

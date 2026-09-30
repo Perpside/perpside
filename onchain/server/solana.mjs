@@ -531,15 +531,23 @@ export async function createPreMarketPool({ coinMint }) {
 // here rather than stored: isCoinMintA(coinMint, SOL_MINT) is a pure
 // function of two pubkeys, so it's always safe to derive fresh instead of
 // trusting a persisted flag to still match.
+// Split out so pool-watcher.mjs's account-change subscription can reuse the
+// exact same comparison against the raw account bytes a WebSocket push
+// already hands it, instead of spending a second RPC round-trip re-fetching
+// what it was just sent.
+export function isPoolDataDepleted(accountData, { tickLower, tickUpper, coinMint }) {
+  const poolState = PoolInfoLayout.decode(accountData);
+  const coinIsMintA = isCoinMintA(coinMint, SOL_MINT);
+  return coinIsMintA ? poolState.tickCurrent >= tickUpper : poolState.tickCurrent <= tickLower;
+}
+
 export async function isPreMarketPoolDepleted({ poolAddress, tickLower, tickUpper, coinMint }) {
   const connection = getConnection();
   const poolAccountInfo = await connection.getAccountInfo(new PublicKey(poolAddress));
   if (!poolAccountInfo) {
     throw new Error(`pool account not found for ${poolAddress} on ${CLUSTER} — likely a stale row from a different cluster`);
   }
-  const poolState = PoolInfoLayout.decode(poolAccountInfo.data);
-  const coinIsMintA = isCoinMintA(coinMint, SOL_MINT);
-  return coinIsMintA ? poolState.tickCurrent >= tickUpper : poolState.tickCurrent <= tickLower;
+  return isPoolDataDepleted(poolAccountInfo.data, { tickLower, tickUpper, coinMint });
 }
 
 // Graduation's other half: withdraws 100% of a pre-market position's

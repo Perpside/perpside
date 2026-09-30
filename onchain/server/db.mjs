@@ -460,6 +460,19 @@ export function listPremarketTokens() {
   }));
 }
 
+// Same shape as one listPremarketTokens() row, for pool-watcher.mjs's
+// account-change callback — a single real-time trade event only ever needs
+// to re-check the one token it's about, not the whole premarket list.
+export function getPremarketToken(mintAddress) {
+  const t = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE mint_address = ? AND status = 'premarket'`).get(mintAddress);
+  if (!t) return null;
+  return {
+    ...t,
+    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'active'").get(mintAddress),
+  };
+}
+
 // Tokens mid-graduation when the process last exited — resumable the same
 // way listPremarketTokens' active pools are, just further along (the pool
 // row is 'closing', not 'active', by the time a token reaches this status).

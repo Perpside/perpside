@@ -20,6 +20,7 @@ import {
 import { SOL_MINT } from './jupiter.mjs';
 import { uploadImage, uploadMetadata } from './upload.mjs';
 import { insertToken, insertPremarketPool, updateTokenStatus, updateFirstBuy, getActivePremarketPool } from './db.mjs';
+import { watchPremarketPool } from './pool-watcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -153,6 +154,11 @@ export async function launchToken({
       initialPrice: pool.startPrice,
     });
     updateTokenStatus(mint, 'premarket');
+    // graduation-cron would pick this pool up within its own 10-minute
+    // cadence regardless, but subscribing right now means a depleting
+    // trade against a fresh launch gets graduated immediately instead of
+    // waiting for the first tick — see pool-watcher.mjs.
+    watchPremarketPool({ mintAddress: mint, poolAddress: pool.poolId, tickLower: pool.tickLower, tickUpper: pool.tickUpper });
     return { mint, imageUrl, metadataUri, pool };
   } catch (err) {
     updateTokenStatus(mint, 'failed', err.message);

@@ -30,10 +30,13 @@ db.exec(`
     community_fee REAL,
     creator_fee REAL,
     buyback_fee REAL,
-    -- 'minting' -> 'pools_pending' -> 'complete', or 'failed' with
-    -- error_message set. A launch stuck on anything but 'complete' means the
-    -- fee was already collected but the platform hasn't finished its side —
-    -- see launch.mjs launchToken() and docs/token-launch-plan.md.
+    -- 'minting' -> 'premarket' -> 'graduating' -> 'complete', or 'failed'
+    -- with error_message set. A launch stuck on anything but 'complete'
+    -- means the fee was already collected but the platform hasn't finished
+    -- its side — see launch.mjs launchToken() and
+    -- docs/token-launch-plan.md "Graduation". 'pools_pending' is a legacy
+    -- value from the old fixed-FDV/immediate-3-CLMM-pool model, kept only
+    -- so pre-graduation rows already in the DB keep reading correctly.
     status TEXT NOT NULL DEFAULT 'minting',
     error_message TEXT,
     created_at TEXT NOT NULL
@@ -96,6 +99,84 @@ db.exec(`
     amount TEXT NOT NULL,
     tx_id TEXT,
     status TEXT NOT NULL DEFAULT 'pending', -- pending -> sent / skipped_dust / failed
+    error_message TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  -- The single, unlocked, single-sided CLMM position a launch trades
+  -- against before graduation (see solana.mjs createPreMarketPool). One row
+  -- per token — a fresh launch creates exactly one of these, never several.
+  CREATE TABLE IF NOT EXISTS premarket_pools (
+    id TEXT PRIMARY KEY,
+    mint_address TEXT NOT NULL REFERENCES tokens(mint_address),
+    pool_address TEXT NOT NULL,
+    position_nft_mint TEXT NOT NULL,
+    tick_lower INTEGER NOT NULL,
+    tick_upper INTEGER NOT NULL,
+    initial_price TEXT NOT NULL,
+    -- active -> closing -> closed. 'closing' covers the window between a
+    -- depletion cron deciding to graduate and closePreMarketPool actually
+    -- confirming, so a crash mid-close doesn't leave a still-'active' row
+    -- that a second cron tick would try to close again.
+    status TEXT NOT NULL DEFAULT 'active',
+    close_tx TEXT,
+    sol_received_lamports TEXT,
+    coin_received_atomic TEXT,
+    created_at TEXT NOT NULL,
+    closed_at TEXT
+  );
+
+  -- A token's real final pools once graduated: standard Raydium CPMM, one
+  -- per backing asset the launch was configured with (1-3), always locked —
+  -- createCpmmPoolAndLock never returns before the lock lands, so unlike
+  -- legacy token_pools' lock_nft_mint this one is never null.
+  CREATE TABLE IF NOT EXISTS final_pools (
+    id TEXT PRIMARY KEY,
+    mint_address TEXT NOT NULL REFERENCES tokens(mint_address),
+    backing_asset TEXT NOT NULL,
+    backing_asset_mint TEXT NOT NULL,
+    pool_address TEXT NOT NULL,
+    lp_mint TEXT NOT NULL,
+    lock_nft_mint TEXT NOT NULL,
+    swap_tx TEXT,
+    create_tx TEXT,
+    lock_tx TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  -- One row per graduation attempt for a token — mirrors reward_runs'
+  -- purpose: resumable if the process crashes/redeploys mid-graduation,
+  -- since graduateToken is several sequential on-chain steps (close, then a
+  -- swap + pool-create per backing asset) and a naive retry-from-scratch
+  -- would try to re-close an already-closed position.
+  CREATE TABLE IF NOT EXISTS graduation_runs (
+    id TEXT PRIMARY KEY,
+    mint_address TEXT NOT NULL REFERENCES tokens(mint_address),
+    premarket_pool_id TEXT NOT NULL REFERENCES premarket_pools(id),
+    status TEXT NOT NULL DEFAULT 'closing', -- closing -> seeding -> complete / failed
+    close_tx TEXT,
+    sol_raised_lamports TEXT,
+    coin_recovered_atomic TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  );
+
+  -- Per-backing-asset progress within a graduation run: this asset's SOL/
+  -- COIN share, the swap that converted the SOL share, and the resulting
+  -- final_pools row — each step persisted as it lands so a resumed run
+  -- knows which assets are already done.
+  CREATE TABLE IF NOT EXISTS graduation_run_assets (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES graduation_runs(id),
+    backing_asset TEXT NOT NULL,
+    backing_asset_mint TEXT NOT NULL,
+    sol_share_lamports TEXT NOT NULL,
+    coin_share_atomic TEXT NOT NULL,
+    swap_tx TEXT,
+    asset_amount_atomic TEXT,
+    pool_id TEXT REFERENCES final_pools(id),
+    status TEXT NOT NULL DEFAULT 'pending', -- pending -> swapped -> pool_created / failed
     error_message TEXT,
     created_at TEXT NOT NULL
   );
@@ -278,6 +359,107 @@ export function markRewardPayoutFailed(id, errorMessage) {
 export function markRewardBuybackSent(id, txId, burnedCoinAmount) {
   db.prepare("UPDATE reward_payouts SET status = 'sent', tx_id = ?, secondary_amount = ? WHERE id = ?")
     .run(txId, String(burnedCoinAmount), id);
+}
+
+export function insertPremarketPool({ id, mintAddress, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice }) {
+  db.prepare(`
+    INSERT INTO premarket_pools (id, mint_address, pool_address, position_nft_mint, tick_lower, tick_upper, initial_price, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+  `).run(id, mintAddress, poolAddress, positionNftMint, tickLower, tickUpper, initialPrice, new Date().toISOString());
+}
+
+// Only ever one 'active'/'closing' row per token at a time — a token past
+// graduation has no reason to look this up again.
+export function getActivePremarketPool(mintAddress) {
+  return db.prepare(`
+    SELECT * FROM premarket_pools WHERE mint_address = ? AND status IN ('active', 'closing') ORDER BY created_at DESC LIMIT 1
+  `).get(mintAddress);
+}
+
+export function updatePremarketPoolStatus(id, status) {
+  db.prepare('UPDATE premarket_pools SET status = ? WHERE id = ?').run(status, id);
+}
+
+export function markPremarketPoolClosed(id, closeTx, solReceivedLamports, coinReceivedAtomic) {
+  db.prepare(`
+    UPDATE premarket_pools SET status = 'closed', close_tx = ?, sol_received_lamports = ?, coin_received_atomic = ?, closed_at = ? WHERE id = ?
+  `).run(closeTx, String(solReceivedLamports), String(coinReceivedAtomic), new Date().toISOString(), id);
+}
+
+// Every token currently trading pre-graduation — what a depletion-detection
+// cron iterates to check each one's pool against its ceiling tick.
+export function listPremarketTokens() {
+  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE status = 'premarket' ORDER BY created_at ASC`).all();
+  return tokens.map((t) => ({
+    ...t,
+    premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'active'").get(t.mint_address),
+  }));
+}
+
+export function insertFinalPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, lpMint, lockNftMint, swapTx, createTx, lockTx }) {
+  db.prepare(`
+    INSERT INTO final_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, lp_mint, lock_nft_mint, swap_tx, create_tx, lock_tx, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, lpMint, lockNftMint, swapTx ?? null, createTx ?? null, lockTx ?? null, new Date().toISOString());
+}
+
+export function getFinalPools(mintAddress) {
+  return db.prepare('SELECT * FROM final_pools WHERE mint_address = ?').all(mintAddress);
+}
+
+// Mirrors getIncompleteRewardRun: a run still 'closing'/'seeding'/'failed'
+// when the process last exited is resumable rather than restarted from
+// scratch, so a retry doesn't try to re-close an already-closed pre-market
+// position.
+export function getIncompleteGraduationRun(mintAddress) {
+  return db.prepare(`
+    SELECT * FROM graduation_runs WHERE mint_address = ? AND status IN ('closing', 'seeding', 'failed') ORDER BY created_at DESC LIMIT 1
+  `).get(mintAddress);
+}
+
+export function createGraduationRun(mintAddress, premarketPoolId) {
+  const id = randomUUID();
+  db.prepare('INSERT INTO graduation_runs (id, mint_address, premarket_pool_id, status, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(id, mintAddress, premarketPoolId, 'closing', new Date().toISOString());
+  return id;
+}
+
+export function markGraduationRunClosed(id, closeTx, solRaisedLamports, coinRecoveredAtomic) {
+  db.prepare(`
+    UPDATE graduation_runs SET status = 'seeding', close_tx = ?, sol_raised_lamports = ?, coin_recovered_atomic = ? WHERE id = ?
+  `).run(closeTx, String(solRaisedLamports), String(coinRecoveredAtomic), id);
+}
+
+export function updateGraduationRunStatus(id, status, errorMessage) {
+  const completedAt = status === 'complete' || status === 'failed' ? new Date().toISOString() : null;
+  db.prepare('UPDATE graduation_runs SET status = ?, error_message = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?')
+    .run(status, errorMessage ?? null, completedAt, id);
+}
+
+export function getGraduationRunAssets(runId) {
+  return db.prepare('SELECT * FROM graduation_run_assets WHERE run_id = ?').all(runId);
+}
+
+export function insertGraduationRunAsset({ runId, backingAsset, backingAssetMint, solShareLamports, coinShareAtomic }) {
+  const id = randomUUID();
+  db.prepare(`
+    INSERT INTO graduation_run_assets (id, run_id, backing_asset, backing_asset_mint, sol_share_lamports, coin_share_atomic, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+  `).run(id, runId, backingAsset, backingAssetMint, String(solShareLamports), String(coinShareAtomic), new Date().toISOString());
+  return id;
+}
+
+export function markGraduationRunAssetSwapped(id, swapTx, assetAmountAtomic) {
+  db.prepare("UPDATE graduation_run_assets SET status = 'swapped', swap_tx = ?, asset_amount_atomic = ? WHERE id = ?")
+    .run(swapTx, String(assetAmountAtomic), id);
+}
+
+export function markGraduationRunAssetPoolCreated(id, poolId) {
+  db.prepare("UPDATE graduation_run_assets SET status = 'pool_created', pool_id = ? WHERE id = ?").run(poolId, id);
+}
+
+export function updateGraduationRunAssetStatus(id, status, errorMessage) {
+  db.prepare('UPDATE graduation_run_assets SET status = ?, error_message = ? WHERE id = ?').run(status, errorMessage ?? null, id);
 }
 
 // Real (successfully sent) totals for a token's page — grouped by kind and,

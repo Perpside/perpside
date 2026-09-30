@@ -1413,6 +1413,42 @@ Jupiter swap step is the same untestable-on-devnet gap as
 verified for real on devnet before being wired in here.
 
 **Still not done:** a cron to detect a depleted pre-market position and
-call `graduateToken`; adapting the reward cron to CPMM; DB schema/status
-flow; replacing the old launch.mjs flow with this one. Frontend still out
-of scope per the user.
+call `graduateToken`; adapting the reward cron to CPMM; replacing the old
+launch.mjs flow with this one. Frontend still out of scope per the user.
+
+## Graduation, part 3: DB schema + resumable graduation runs (2026-09-30)
+
+Four new tables, purely additive — nothing existing changed, so this is
+safe to deploy even before anything writes to them yet.
+
+**premarket_pools.** One row per token's pre-market CLMM position
+(`active` -> `closing` -> `closed`), populated by `createPreMarketPool`
+(not wired in yet) and closed out by `closePreMarketPool`'s result.
+`listPremarketTokens()` is what a depletion-detection cron (not built yet)
+will iterate.
+
+**final_pools.** A token's real graduated CPMM pools, one row per backing
+asset — the new-model equivalent of `token_pools`, kept as a separate
+table rather than extending `token_pools` because several of its columns
+(`position_nft_mint`, `tick_lower`, `tick_upper`) are CLMM-specific and
+`NOT NULL` on the live production table; adding a CPMM row there would
+mean either fake tick values or a schema migration SQLite can't do via a
+plain `ALTER TABLE`. `token_pools` stays untouched for existing/legacy
+rows; new tokens use `final_pools` going forward.
+
+**graduation_runs / graduation_run_assets.** Same resumability pattern as
+`reward_runs`/`reward_run_pools`: graduation is several sequential
+on-chain steps (close the pre-market position, then swap + create-pool
+per backing asset), so a crash mid-run needs to resume from where it left
+off rather than retry from scratch — retrying `closePreMarketPool` on an
+already-closed position would just fail. `getIncompleteGraduationRun`
+mirrors `getIncompleteRewardRun` exactly. `graduateToken` in
+graduation.mjs does not yet write to these tables (it's still the plain,
+non-resumable version from part 2) — wiring that up is the next step,
+together with the depletion cron that will actually call it.
+
+Verified by a scratch-DB smoke test exercising every new function
+end-to-end (insert a premarket pool, look it up, create a graduation run,
+add an asset row, mark it swapped, insert its final pool, mark it
+pool_created, close out the run, close the premarket pool) — not just a
+syntax check.

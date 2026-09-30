@@ -13,6 +13,8 @@ import {
   LaunchValidationError,
 } from './launch.mjs';
 import { listTokens, getToken, getTokenRewardTotals } from './db.mjs';
+import { runRewardCycle } from './rewards.mjs';
+import { runGraduationCycle } from './graduation.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..', '..');
@@ -92,6 +94,45 @@ app.post('/api/launch', apiRoute(launchToken, 'launch failed'));
 // "Graduation" for why the old two-hop shape no longer applies.
 app.post('/api/launch/first-buy/tx', apiRoute(prepareFirstBuy, 'first-buy failed'));
 app.post('/api/launch/first-buy', apiRoute(broadcastFirstBuy, 'first-buy broadcast failed'));
+
+// Reward/graduation crons run as separate Railway Cron Schedule services
+// (reward-cron.mjs, graduation-cron.mjs) — deliberately, so a stuck cycle
+// can't affect the site staying up, and vice versa. But they can't open
+// db.mjs's SQLite file directly: Railway volumes attach to exactly one
+// service per environment (confirmed against the real API —
+// VolumeInstanceUpdateInput's serviceId "attaches" by *reassigning* the
+// existing instance, there's no multi-service simultaneous attachment), so
+// only this always-on service — the one with perpside-volume actually
+// mounted — can touch the real database. The cron services instead make an
+// HTTP call over Railway's private network to these routes and let this
+// process do the real work, keeping the "isolated process" property the
+// separate-services design wants without needing a second copy of the data.
+// Not truly "internal" in the sense of being unreachable from the public
+// internet — this Express app answers both perpside.fun and
+// perpside.railway.internal on the same port/routes — so a shared secret
+// gates it instead.
+const INTERNAL_CRON_SECRET = process.env.INTERNAL_CRON_SECRET;
+if (!INTERNAL_CRON_SECRET) {
+  console.warn('INTERNAL_CRON_SECRET not set — /internal/* routes will reject every request.');
+}
+
+function internalRoute(cycleFn, label) {
+  return async (req, res) => {
+    if (!INTERNAL_CRON_SECRET || req.get('x-internal-secret') !== INTERNAL_CRON_SECRET) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    try {
+      await cycleFn();
+      res.json({ ok: true });
+    } catch (err) {
+      console.error(`${label} failed:`, err);
+      res.status(500).json({ error: `${label} failed` });
+    }
+  };
+}
+
+app.post('/internal/run-reward-cycle', internalRoute(runRewardCycle, 'reward cycle'));
+app.post('/internal/run-graduation-cycle', internalRoute(runGraduationCycle, 'graduation cycle'));
 
 // Same service also serves the static landing page/dashboard (index.html,
 // assets/) — one Railway service, one domain, no separate CORS story for

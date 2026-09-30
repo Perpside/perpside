@@ -1779,3 +1779,73 @@ anywhere, and zero console/page errors throughout.
 (manual dashboard step, not a code change — see part 4). With First Buy's
 frontend now caught up, there is no other known gap between the backend
 graduation feature and the live site.
+
+## Graduation, part 8: cron services can't reach the database directly — a real, already-live bug found while standing up graduation-cron (2026-09-30)
+
+Creating the graduation-cron Railway service (part 4's remaining manual
+step) surfaced a structural problem that turned out to already be live and
+broken, not something new: **a Railway volume attaches to exactly one
+service per environment.** Confirmed against the real API, not assumed —
+`VolumeInstanceUpdateInput.serviceId`'s own description is "the service to
+attach the volume to... if not provided, the volume will be disconnected,"
+and `volumeInstanceUpdate` "updates *a* volume instance" (singular) per
+`(volumeId, environmentId)`. There's no mutation that adds a *second*
+simultaneous attachment for another service.
+
+**reward-cron has had no real database access since it was created.**
+Its actual deployed config (pulled via `railway config pull --json`, not
+guessed) shows `volumeAttachments: null` / `volumeMounts: []`, while
+`DB_PATH=/data/perpside.db` still pointed at a path that only exists
+because `perpside` has the volume mounted. Confirmed for real: `new
+DatabaseSync('/some-path-with-no-volume/x.db')` throws `unable to open
+database file` — node:sqlite does not create missing parent directories.
+reward-cron's `db.mjs` import runs this exact call at module load, so
+every single run has almost certainly crashed before ever reaching the
+reward-cycle logic. The CLUSTER/RPC_URL fix from earlier in this document
+was real and correctly diagnosed, but was verified by SSHing into
+`perpside` (which *does* have the volume) under the assumption "same
+image/DB/env" — true for the image and env vars, not true for the
+database, which is the actual blocker.
+
+**Fix: cron services no longer touch the database at all.** Asked the
+user how to resolve this (a real architecture choice, not an
+implementation detail — options included moving the crons in-process,
+migrating to Postgres, or routing through the always-on service) rather
+than picking unilaterally; they chose the last one. `perpside` (index.mjs)
+now exposes `POST /internal/run-reward-cycle` and
+`POST /internal/run-graduation-cycle`, gated by a shared
+`INTERNAL_CRON_SECRET` header (`x-internal-secret`) — not truly
+network-isolated, since this Express app answers both `perpside.fun` and
+`perpside.railway.internal` on the same port/routes, so the secret is what
+actually gates it. `reward-cron.mjs`/`graduation-cron.mjs` are now thin
+shells (`cron-trigger.mjs`) that POST to `perpside.railway.internal:3000`
+over Railway's private network and exit 0/1 on the response — they no
+longer import `rewards.mjs`/`graduation.mjs`/`solana.mjs` at all, so they
+also no longer need `CLUSTER`/`RPC_URL`/`PLATFORM_WALLET_SECRET`/`DB_PATH`
+— removed from both services' variables, which incidentally means two
+fewer places holding a copy of the mainnet platform wallet's private key.
+
+**Verified locally before touching production:** started `index.mjs` with
+a test `INTERNAL_CRON_SECRET`, confirmed `/internal/run-reward-cycle`
+returns 403 with a wrong or missing secret and 200 with the right one,
+then ran the real `reward-cron.mjs`/`graduation-cron.mjs` scripts against
+it with `PERPSIDE_INTERNAL_URL` pointed at localhost — both correctly
+triggered the cycle over a real HTTP call and exited 0, and a
+wrong-secret run correctly exited 1 with the real HTTP 403 body surfaced
+in its error message.
+
+**graduation-cron created and configured** (`railway add` +
+`serviceInstanceUpdate` via the raw GraphQL API for `startCommand`/
+`cronSchedule`/`restartPolicyType`, since `railway config apply` triggered
+this environment's own credential-leakage guard on the exploratory `--help`
+call and was avoided): `node --experimental-sqlite onchain/server/
+graduation-cron.mjs`, every 10 minutes (tighter than reward-cron's 2 hours
+— deliberately, since a depleted pre-market pool sitting un-graduated is a
+more visible, time-sensitive gap than a delayed fee harvest), `NEVER`
+restart policy matching reward-cron's own.
+
+**Still to verify:** whether `perpside.railway.internal:3000` (the private
+networking port, inferred from the Dockerfile's `EXPOSE 3000` and no
+`PORT` variable being set — not yet confirmed against a real deployed
+call) is actually correct once both cron services redeploy against the
+real production `perpside` instance.

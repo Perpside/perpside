@@ -1844,8 +1844,15 @@ graduation-cron.mjs`, every 10 minutes (tighter than reward-cron's 2 hours
 more visible, time-sensitive gap than a delayed fee harvest), `NEVER`
 restart policy matching reward-cron's own.
 
-**Still to verify:** whether `perpside.railway.internal:3000` (the private
-networking port, inferred from the Dockerfile's `EXPOSE 3000` and no
-`PORT` variable being set — not yet confirmed against a real deployed
-call) is actually correct once both cron services redeploy against the
-real production `perpside` instance.
+**Port 3000 guess was wrong — caught and fixed against real production,
+not left as a TODO.** Railway auto-injects its own `PORT` at runtime
+regardless of what the Dockerfile exposes; SSHing into the live
+`perpside` container and reading its real `$PORT` showed 8080. Confirmed
+by first reproducing the real failure (`fetch failed` /
+`ECONNREFUSED ...:3000` from a real `graduation-cron.mjs` run via SSH
+against production), then confirming the fix the same way — a real
+`fetch` to `:8080` from inside the container, then both cron scripts run
+for real against production with `PERPSIDE_INTERNAL_URL` overridden to
+port 8080, both completing cleanly. `cron-trigger.mjs`'s default updated
+to port 8080 accordingly, with `PERPSIDE_INTERNAL_URL` kept as an escape
+hatch if this value ever changes again.

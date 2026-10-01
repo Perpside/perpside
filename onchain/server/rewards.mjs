@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PublicKey } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import BN from 'bn.js';
 import {
   getConnection,
@@ -185,7 +186,7 @@ function splitByRewardModel(harvestedAtomic, token) {
 // successful attempt). This is what lets a whole pool retry safely after
 // one of its three payout kinds fails without redoing the other two.
 
-async function distributeCommunity({ runPoolId, mintAddress, backingAssetMint, decimals, usdPrice, amountAtomic, excludeOwners }) {
+async function distributeCommunity({ runPoolId, mintAddress, backingAssetMint, decimals, tokenProgram, usdPrice, amountAtomic, excludeOwners }) {
   let payouts = getRewardPayouts(runPoolId).filter((p) => p.kind === 'community');
   if (!payouts.length) {
     if (amountAtomic.lten(0)) return;
@@ -205,14 +206,14 @@ async function distributeCommunity({ runPoolId, mintAddress, backingAssetMint, d
   const toSend = payouts.filter((p) => p.status === 'pending').map((p) => ({ wallet: p.recipient_wallet, amountAtomic: new BN(p.amount) }));
   if (!toSend.length) return;
 
-  const results = await sendTokenBatch(backingAssetMint, toSend);
+  const results = await sendTokenBatch(backingAssetMint, decimals, toSend, tokenProgram);
   for (const result of results) {
     const payout = payouts.find((p) => p.recipient_wallet === result.wallet && p.status === 'pending');
     if (payout) markRewardPayoutSent(payout.id, result.txId);
   }
 }
 
-async function payCreator({ runPoolId, backingAssetMint, creatorWallet, amountAtomic }) {
+async function payCreator({ runPoolId, backingAssetMint, decimals, tokenProgram, creatorWallet, amountAtomic }) {
   let payout = getRewardPayouts(runPoolId).find((p) => p.kind === 'creator');
   if (!payout) {
     if (amountAtomic.lten(0) || !creatorWallet) return;
@@ -221,7 +222,7 @@ async function payCreator({ runPoolId, backingAssetMint, creatorWallet, amountAt
   }
   if (payout.status !== 'pending') return;
 
-  const [result] = await sendTokenBatch(backingAssetMint, [{ wallet: payout.recipient_wallet, amountAtomic: new BN(payout.amount) }]);
+  const [result] = await sendTokenBatch(backingAssetMint, decimals, [{ wallet: payout.recipient_wallet, amountAtomic: new BN(payout.amount) }], tokenProgram);
   markRewardPayoutSent(payout.id, result.txId);
 }
 
@@ -239,7 +240,7 @@ async function executeBuyback({ runPoolId, poolAddress, coinMint, backingAssetMi
   markRewardBuybackSent(payout.id, `${swapResult.txId},${burnResult.txId}`, swapResult.amountOutAtomic);
 }
 
-async function payPlatformRevenue({ runPoolId, backingAssetMint, amountAtomic }) {
+async function payPlatformRevenue({ runPoolId, backingAssetMint, decimals, tokenProgram, amountAtomic }) {
   let payout = getRewardPayouts(runPoolId).find((p) => p.kind === 'platform');
   if (!payout) {
     if (amountAtomic.lten(0)) return;
@@ -248,7 +249,7 @@ async function payPlatformRevenue({ runPoolId, backingAssetMint, amountAtomic })
   }
   if (payout.status !== 'pending') return;
 
-  const [result] = await sendTokenBatch(backingAssetMint, [{ wallet: payout.recipient_wallet, amountAtomic: new BN(payout.amount) }]);
+  const [result] = await sendTokenBatch(backingAssetMint, decimals, [{ wallet: payout.recipient_wallet, amountAtomic: new BN(payout.amount) }], tokenProgram);
   markRewardPayoutSent(payout.id, result.txId);
 }
 
@@ -276,10 +277,16 @@ async function processPool(run, token, pool) {
   // the distribute phase below — if the conversion swap fails, retrying
   // must not re-harvest, and folding it into this phase means
   // harvested_amount is only ever persisted once both steps succeed.
+  // final_pools rows written before Token-2022 support existed have no
+  // token_program on record — but every backing asset accepted back then
+  // was classic SPL (assertAssets rejected Token-2022 outright), so a
+  // missing value can only ever mean that.
+  const assetProgramId = pool.token_program || TOKEN_PROGRAM_ID.toBase58();
+
   if (runPool.harvested_amount == null) {
     try {
       const harvest = await harvestCpmmLockedFees({
-        poolId: pool.pool_address, lockNftMint: pool.lock_nft_mint, coinMint: token.mint_address, assetMint: pool.backing_asset_mint,
+        poolId: pool.pool_address, lockNftMint: pool.lock_nft_mint, coinMint: token.mint_address, assetMint: pool.backing_asset_mint, assetProgramId,
       });
       let totalAssetAtomic = harvest.assetHarvestedAtomic;
       if (harvest.coinHarvestedAtomic.gtn(0)) {
@@ -299,7 +306,7 @@ async function processPool(run, token, pool) {
   try {
     const harvestedAtomic = new BN(runPool.harvested_amount);
     const platformFeeAtomic = harvestedAtomic.muln(Math.round(PLATFORM_FEE_FRACTION * 100)).divn(100);
-    await payPlatformRevenue({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, amountAtomic: platformFeeAtomic });
+    await payPlatformRevenue({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, decimals: pool.decimals, tokenProgram: assetProgramId, amountAtomic: platformFeeAtomic });
 
     const remainderAtomic = harvestedAtomic.sub(platformFeeAtomic);
     const { communityAtomic, creatorAtomic, buybackAtomic } = splitByRewardModel(remainderAtomic, token);
@@ -313,9 +320,9 @@ async function processPool(run, token, pool) {
 
     await distributeCommunity({
       runPoolId: runPool.id, mintAddress: token.mint_address, backingAssetMint: pool.backing_asset_mint,
-      decimals: pool.decimals, usdPrice, amountAtomic: communityAtomic, excludeOwners,
+      decimals: pool.decimals, tokenProgram: assetProgramId, usdPrice, amountAtomic: communityAtomic, excludeOwners,
     });
-    await payCreator({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, creatorWallet: token.creator_wallet, amountAtomic: creatorAtomic });
+    await payCreator({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, decimals: pool.decimals, tokenProgram: assetProgramId, creatorWallet: token.creator_wallet, amountAtomic: creatorAtomic });
     await executeBuyback({ runPoolId: runPool.id, poolAddress: pool.pool_address, coinMint: token.mint_address, backingAssetMint: pool.backing_asset_mint, amountAtomic: buybackAtomic });
 
     updateRewardRunPoolStatus(runPool.id, 'distributed');

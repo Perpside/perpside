@@ -14,7 +14,7 @@ import {
   calculateLaunchFeeLamports,
   redactSecrets,
   listFeeTierPercents,
-  getMintDecimals,
+  getMintInfo,
   CLUSTER,
   TOTAL_SUPPLY_WHOLE,
   COIN_DECIMALS,
@@ -97,16 +97,13 @@ async function assertAssets(assets) {
     if (seen.has(mint)) throw new LaunchValidationError('backing assets must be unique');
     seen.add(mint);
 
-    let decimals;
+    let decimals, programId;
     try {
-      decimals = await getMintDecimals(mint);
+      ({ decimals, programId } = await getMintInfo(mint));
     } catch (err) {
-      // getMintDecimals' own message already distinguishes "no real mint
-      // here at all" from "real mint, but Token-2022" — surfaced as-is
-      // rather than flattened into one generic message.
       throw new LaunchValidationError(`${symbol}: ${err.message}`);
     }
-    resolved.push({ symbol: symbol.toUpperCase(), mint, decimals });
+    resolved.push({ symbol: symbol.toUpperCase(), mint, decimals, programId });
   }
   return resolved;
 }

@@ -2039,3 +2039,81 @@ pieces (`createCpmmPoolAndLock`'s `assetDecimals` param,
 to code paths already proven correct earlier in this document with the
 registry assets — not independently re-verified end-to-end here, and
 flagged as the one honest gap in this pass rather than left unstated.
+
+## Token-2022 backing assets (2026-10-01)
+
+The previous pass deliberately rejected Token-2022 mints as a backing
+asset — `getMintDecimals` threw a clear error for one rather than
+half-supporting it. Asked to add real support now.
+
+**Checked Raydium's own CPMM module first, not assumed.** Reading the
+actual SDK source: `cpmm.createPool` already checks each mint's real
+`programId` and, given `addSupportMintExt: true`, fetches a Token-2022
+mint's own extension accounts (transfer-fee config etc.) via
+`getPdaMintExAccountCp`; `swap`/`harvestLockLp` already derive ATAs from
+the pool's real on-chain `mintA.programId`/`mintB.programId`. None of
+that needed changing — the real gaps were all in Perpside's own code,
+every place a token program had been silently assumed to be classic SPL.
+
+**`solana.mjs`:**
+- `getMintDecimals` → `getMintInfo`: reads the mint account's real owner
+  (classic SPL or Token-2022 — anything else still rejected) and returns
+  `{decimals, programId}` instead of just decimals.
+- `createCpmmPoolAndLock` takes a new `assetProgramId` param, threaded
+  into `assetToken.programId` and into `addSupportMintExt` (true only
+  when the asset side is actually Token-2022 — a no-op for classic SPL).
+- `getTokenBalance` takes an optional `programId` (defaults to classic
+  SPL, so every COIN-side caller — COIN is always classic, minted by
+  Perpside itself — is unaffected).
+- `sendTokenBatch` signature changed: `(mint, recipients)` →
+  `(mint, decimals, recipients, programId = TOKEN_PROGRAM_ID)`. Also
+  switched from `createTransferInstruction` to
+  `createTransferCheckedInstruction` — checked against `@solana/spl-token`'s
+  real `.d.ts`, not memory. This wasn't optional: a Token-2022 mint with
+  certain extensions (transfer fees being the common one) rejects the
+  legacy `Transfer` instruction outright on-chain, and `TransferChecked`
+  is simply the more correct choice for classic mints too (it validates
+  mint/decimals match).
+- `harvestCpmmLockedFees` takes `assetProgramId`, threaded into both of
+  its asset-side `getTokenBalance` balance-diff calls.
+
+**`launch.mjs` `assertAssets`** now calls `getMintInfo` and stores
+`programId` alongside `symbol`/`mint`/`decimals` in each resolved asset
+object — `tokens.backing_assets` carries it from here on, same pattern
+`decimals` already established.
+
+**`db.mjs`**: `final_pools` gained a `token_program` column (same
+nullable-migration pattern as `decimals` — no real final_pools rows
+existed to backfill), and `insertFinalPool` now takes/stores
+`tokenProgram`.
+
+**`graduation.mjs`/`rewards.mjs`** both read `token.backingAssets`/
+`pool.token_program` and fall back to classic SPL when it's missing —
+not a guess: every `backingAssets` row written before this pass is
+necessarily classic SPL, since the old `assertAssets` rejected
+Token-2022 outright. A pre-existing launch graduating or earning
+rewards after this deploy works exactly as before; nothing needed a
+backfill.
+
+**Real devnet verification, scoped to what the budget allowed.** The
+platform wallet had ~0.084 SOL and the devnet faucet is still down
+(confirmed again — `requestAirdrop` against both the public devnet RPC
+and the configured Helius endpoint both return 500s); a real
+`createCpmmPoolAndLock` graduation costs ~0.2 SOL per asset on its own
+(see `MEASURED_GRADUATION_PER_ASSET_LAMPORTS` above), so a full
+launch→deplete→graduate cycle with a Token-2022 asset was not
+affordable this pass. What *was* verified for real
+(`_test-token2022.mjs`, run and deleted): minted a real Token-2022 mint
+on devnet with a live TransferFeeConfig extension (1% fee) — the
+specific case that breaks the legacy `Transfer` instruction — then
+confirmed `getMintInfo` correctly identifies it (`programId` =
+`TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb`, right decimals), and that
+`sendTokenBatch` correctly creates the recipient's Token-2022 ATA and
+transfers via `TransferChecked`: the recipient received exactly 990,000
+of 1,000,000 atomic units sent, i.e. the on-chain 1% fee was actually
+applied — something the old `createTransferInstruction` path would have
+rejected outright rather than silently mishandled. `createCpmmPoolAndLock`'s
+`addSupportMintExt` path (the one piece of this that's genuinely new
+surface in Perpside's own code, not just correctly plumbing an existing
+param) is **not** verified end-to-end — flagged here rather than left
+unstated, same as every other budget-driven gap in this document.

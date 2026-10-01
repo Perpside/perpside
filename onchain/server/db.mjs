@@ -158,6 +158,11 @@ db.exec(`
     backing_asset TEXT NOT NULL,
     backing_asset_mint TEXT NOT NULL,
     decimals INTEGER NOT NULL,
+    -- Classic SPL or Token-2022 (see launch.mjs assertAssets /
+    -- solana.mjs getMintInfo) — carried over from tokens.backing_assets
+    -- the same way decimals is, so rewards.mjs's ATA derivation for
+    -- harvests and payouts uses the right program without re-fetching it.
+    token_program TEXT NOT NULL,
     pool_address TEXT NOT NULL,
     lp_mint TEXT NOT NULL,
     lock_nft_mint TEXT NOT NULL,
@@ -276,6 +281,9 @@ if (!finalPoolColumns.includes('decimals')) {
   // feature's first mainnet pools didn't exist yet), and insertFinalPool
   // always provides a real value for every row created from here on.
   db.exec('ALTER TABLE final_pools ADD COLUMN decimals INTEGER');
+}
+if (!finalPoolColumns.includes('token_program')) {
+  db.exec('ALTER TABLE final_pools ADD COLUMN token_program TEXT');
 }
 
 export function insertToken({
@@ -496,11 +504,11 @@ export function listGraduatingTokens() {
   }));
 }
 
-export function insertFinalPool({ id, mintAddress, backingAsset, backingAssetMint, decimals, poolAddress, lpMint, lockNftMint, swapTx, createTx, lockTx }) {
+export function insertFinalPool({ id, mintAddress, backingAsset, backingAssetMint, decimals, tokenProgram, poolAddress, lpMint, lockNftMint, swapTx, createTx, lockTx }) {
   db.prepare(`
-    INSERT INTO final_pools (id, mint_address, backing_asset, backing_asset_mint, decimals, pool_address, lp_mint, lock_nft_mint, swap_tx, create_tx, lock_tx, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, mintAddress, backingAsset, backingAssetMint, decimals, poolAddress, lpMint, lockNftMint, swapTx ?? null, createTx ?? null, lockTx ?? null, new Date().toISOString());
+    INSERT INTO final_pools (id, mint_address, backing_asset, backing_asset_mint, decimals, token_program, pool_address, lp_mint, lock_nft_mint, swap_tx, create_tx, lock_tx, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, mintAddress, backingAsset, backingAssetMint, decimals, tokenProgram, poolAddress, lpMint, lockNftMint, swapTx ?? null, createTx ?? null, lockTx ?? null, new Date().toISOString());
 }
 
 export function getFinalPools(mintAddress) {

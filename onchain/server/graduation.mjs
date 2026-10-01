@@ -9,6 +9,7 @@
 // persisted instead of retrying a step that already landed.
 import { randomUUID } from 'crypto';
 import BN from 'bn.js';
+import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted } from './solana.mjs';
 import {
   listPremarketTokens,
@@ -51,6 +52,11 @@ async function processAsset(token, row, totalRewardFeePercent) {
     // now, not just the three Hylo registry ones that could assume 6.
     const assetInfo = (token.backingAssets || []).find((a) => a.mint === row.backing_asset_mint);
     if (!assetInfo) throw new Error(`no decimals on record for backing asset ${row.backing_asset_mint} — missing from token.backingAssets`);
+    // Tokens launched before Token-2022 support existed have no programId
+    // on their stored backingAssets row — but assertAssets back then only
+    // ever accepted classic SPL mints (getMintDecimals rejected Token-2022
+    // outright), so classic SPL is the only thing a missing value can mean.
+    const assetProgramId = assetInfo.programId || TOKEN_PROGRAM_ID.toBase58();
 
     let swapTx = row.swap_tx;
     let assetAmountAtomic = row.asset_amount_atomic ? new BN(row.asset_amount_atomic) : null;
@@ -68,6 +74,7 @@ async function processAsset(token, row, totalRewardFeePercent) {
       coinMint: token.mint_address,
       assetMint: row.backing_asset_mint,
       assetDecimals: assetInfo.decimals,
+      assetProgramId,
       coinAmountAtomic: new BN(row.coin_share_atomic),
       assetAmountAtomic,
       totalRewardFeePercent,
@@ -80,6 +87,7 @@ async function processAsset(token, row, totalRewardFeePercent) {
       backingAsset: row.backing_asset,
       backingAssetMint: row.backing_asset_mint,
       decimals: assetInfo.decimals,
+      tokenProgram: assetProgramId,
       poolAddress: poolResult.poolId,
       lpMint: poolResult.lpMint,
       lockNftMint: poolResult.lockNftMint,

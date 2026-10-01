@@ -8,7 +8,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   createMintToInstruction,
   createSetAuthorityInstruction,
-  createTransferInstruction,
+  createTransferCheckedInstruction,
   createBurnInstruction,
   AuthorityType,
   getAssociatedTokenAddress,
@@ -638,18 +638,21 @@ export async function swapPlatformSolForAsset({ assetMint, amountInLamports }) {
 // nobody (platform included) can withdraw the underlying liquidity:
 // collectCreatorFees/harvestLockLp remain available for the reward model
 // without that guarantee being at odds with fee collection.
-export async function createCpmmPoolAndLock({ coinMint, assetMint, assetDecimals, coinAmountAtomic, assetAmountAtomic, totalRewardFeePercent }) {
+export async function createCpmmPoolAndLock({ coinMint, assetMint, assetDecimals, assetProgramId, coinAmountAtomic, assetAmountAtomic, totalRewardFeePercent }) {
   const raydium = await getRaydium();
   const connection = getConnection();
   const payer = getPlatformWallet();
 
   const feeConfig = pickCpmmConfig(totalRewardFeePercent);
   const coinToken = { address: coinMint, decimals: COIN_DECIMALS, programId: TOKEN_PROGRAM_ID.toBase58() };
-  // Any real mint now (see launch.mjs assertAssets), not just the three
-  // Hylo registry ones that happened to all be 6 decimals — the caller
-  // already resolved and stored this at launch time, so it's passed in
-  // rather than re-fetched here.
-  const assetToken = { address: assetMint, decimals: assetDecimals, programId: TOKEN_PROGRAM_ID.toBase58() };
+  // Any real mint now (see launch.mjs assertAssets), classic SPL or
+  // Token-2022, not just the three Hylo registry ones that happened to
+  // all be classic 6-decimal tokens — the caller already resolved and
+  // stored both of these at launch time, so they're passed in rather than
+  // re-fetched here. Raydium's CPMM program natively supports Token-2022
+  // pool sides as long as the right programId is given per mint, same as
+  // any other field here — not a special case.
+  const assetToken = { address: assetMint, decimals: assetDecimals, programId: assetProgramId };
   const coinIsMintA = isCoinMintA(coinMint, assetMint);
 
   const { execute: executeCreate, extInfo: createExtInfo } = await raydium.cpmm.createPool({
@@ -663,6 +666,11 @@ export async function createCpmmPoolAndLock({ coinMint, assetMint, assetDecimals
     feeConfig,
     associatedOnly: false,
     ownerInfo: { useSOLBalance: true },
+    // Fetches a Token-2022 mint's own extension accounts (transfer fee
+    // config and similar) so the pool is created correctly for whichever
+    // extensions it actually has — read from the SDK's own createPool
+    // source, not assumed; a no-op when the asset is a classic SPL mint.
+    addSupportMintExt: assetProgramId === TOKEN_2022_PROGRAM_ID.toBase58(),
     txVersion: TxVersion.V0,
   });
   const createResult = await executeCreate({ sendAndConfirm: true });
@@ -700,43 +708,44 @@ export async function createCpmmPoolAndLock({ coinMint, assetMint, assetDecimals
 // Buy's second hop off what the SOL->asset swap actually delivered, instead
 // of trusting a pre-swap quote estimate that could drift from the real
 // on-chain result.
-export async function getTokenBalance(ownerWallet, mint) {
+// programId defaults to classic SPL — every existing caller passes COIN
+// (always classic, since mintCoinToken only ever mints that way), so this
+// stays backward compatible; callers reading a Token-2022 backing asset's
+// balance pass its real program explicitly (see harvestCpmmLockedFees).
+export async function getTokenBalance(ownerWallet, mint, programId = TOKEN_PROGRAM_ID) {
   const connection = getConnection();
-  const ata = await getAssociatedTokenAddress(new PublicKey(mint), new PublicKey(ownerWallet));
+  const tokenProgramId = programId instanceof PublicKey ? programId : new PublicKey(programId);
+  const ata = await getAssociatedTokenAddress(new PublicKey(mint), new PublicKey(ownerWallet), false, tokenProgramId);
   try {
-    const account = await getAccount(connection, ata);
+    const account = await getAccount(connection, ata, undefined, tokenProgramId);
     return new BN(account.amount.toString());
   } catch {
     return new BN(0);
   }
 }
 
-// Any real classic-SPL mint can be a backing asset now (see launch.mjs
-// assertAssets), not just the three Hylo registry ones whose decimals used
-// to be a hardcoded, known-safe 6 — this reads the real value off the mint
-// account instead of assuming. Throws on anything that isn't a real mint
-// on this cluster, which assertAssets relies on to reject a bad address
-// before the creator ever pays the launch fee.
-//
-// Deliberately rejects Token-2022 mints too, rather than silently
-// accepting one that would fail confusingly much later: this file assumes
-// TOKEN_PROGRAM_ID (the classic token program) throughout — ATA
-// derivation for reward payouts (sendTokenBatch), swaps
-// (swapPlatformCpmm/swapPlatformSolForAsset), and pool creation
-// (createCpmmPoolAndLock) all do — and making the entire payout/swap/pool
-// pipeline Token-2022-aware is real, untested scope beyond just reading a
-// decimals value. Failing clearly here, at launch validation time, beats
-// failing unclearly during graduation or a reward run months later.
-export async function getMintDecimals(mintAddress) {
+// Any real mint can be a backing asset now (see launch.mjs assertAssets) —
+// classic SPL or Token-2022, not just the three Hylo registry ones whose
+// decimals/program used to be hardcoded assumptions (always 6 decimals,
+// always TOKEN_PROGRAM_ID). Reads the mint account's *real* owner to tell
+// which token program it actually belongs to, rather than assuming, then
+// reads real decimals off it via that same program. Throws on anything
+// that isn't a real mint owned by one of the two known token programs on
+// this cluster, which assertAssets relies on to reject a bad address
+// before the creator ever pays the launch fee — failing clearly here, at
+// launch validation time, beats failing unclearly during graduation or a
+// reward run months later.
+export async function getMintInfo(mintAddress) {
   const connection = getConnection();
   const mintPubkey = new PublicKey(mintAddress);
   const accountInfo = await connection.getAccountInfo(mintPubkey);
   if (!accountInfo) throw new Error(`no account found at ${mintAddress}`);
-  if (accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
-    throw new Error(`${mintAddress} is a Token-2022 mint — not supported as a backing asset yet, only classic SPL tokens`);
-  }
-  const info = await getMint(connection, mintPubkey);
-  return info.decimals;
+  let programId;
+  if (accountInfo.owner.equals(TOKEN_PROGRAM_ID)) programId = TOKEN_PROGRAM_ID;
+  else if (accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) programId = TOKEN_2022_PROGRAM_ID;
+  else throw new Error(`${mintAddress} is not owned by a known token program on ${CLUSTER}`);
+  const info = await getMint(connection, mintPubkey, undefined, programId);
+  return { decimals: info.decimals, programId: programId.toBase58() };
 }
 
 // Second hop of First Buy: swap `amountIn` atomic units of the backing
@@ -866,7 +875,7 @@ export async function getCpmmPoolPendingFees({ lockNftMint }) {
 // number can still be moving). Returns exact harvested amounts by diffing
 // the platform's real balances around the call, same pattern as every other
 // harvest/close function in this file.
-export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, assetMint }) {
+export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, assetMint, assetProgramId }) {
   const payer = getPlatformWallet();
   const raydium = await getRaydium();
 
@@ -877,7 +886,7 @@ export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, ass
 
   const { poolInfo, poolKeys } = await raydium.cpmm.getPoolInfoFromRpc(poolId);
   const coinBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
-  const assetBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), assetMint);
+  const assetBalanceBefore = await getTokenBalance(payer.publicKey.toBase58(), assetMint, assetProgramId);
 
   const { execute } = await raydium.cpmm.harvestLockLp({
     poolInfo,
@@ -903,7 +912,7 @@ export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, ass
   const result = await execute({ sendAndConfirm: true });
 
   const coinBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), coinMint);
-  const assetBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), assetMint);
+  const assetBalanceAfter = await getTokenBalance(payer.publicKey.toBase58(), assetMint, assetProgramId);
   return {
     txId: result?.txId ?? String(result),
     coinHarvestedAtomic: coinBalanceAfter.sub(coinBalanceBefore),
@@ -920,11 +929,23 @@ export async function harvestCpmmLockedFees({ poolId, lockNftMint, coinMint, ass
 // not just estimated.
 const RECIPIENTS_PER_BATCH = 8;
 
-export async function sendTokenBatch(mint, recipients) {
+// programId defaults to classic SPL — every reward-payout call site passes
+// a backing asset's real program and decimals explicitly now (see
+// rewards.mjs processPool), which may be Token-2022; the defaults just
+// keep this generic utility backward compatible for any future
+// classic-only caller. Uses TransferChecked rather than the plain legacy
+// Transfer instruction this used before: Token-2022 mints with certain
+// extensions (transfer fees being the common one) reject a plain Transfer
+// outright and require the Checked variant, and it's the more correct
+// choice for classic mints too (validates the mint/decimals match instead
+// of trusting the caller blindly) — not a Token-2022-only concern, just
+// never mattered with only the three always-matching Hylo registry assets.
+export async function sendTokenBatch(mint, decimals, recipients, programId = TOKEN_PROGRAM_ID) {
   const connection = getConnection();
   const payer = getPlatformWallet();
   const mintPubkey = new PublicKey(mint);
-  const fromAta = await getAssociatedTokenAddress(mintPubkey, payer.publicKey);
+  const tokenProgramId = programId instanceof PublicKey ? programId : new PublicKey(programId);
+  const fromAta = await getAssociatedTokenAddress(mintPubkey, payer.publicKey, false, tokenProgramId);
 
   const results = [];
   for (let i = 0; i < recipients.length; i += RECIPIENTS_PER_BATCH) {
@@ -932,9 +953,9 @@ export async function sendTokenBatch(mint, recipients) {
     const tx = new Transaction();
     for (const { wallet, amountAtomic } of batch) {
       const owner = new PublicKey(wallet);
-      const toAta = await getAssociatedTokenAddress(mintPubkey, owner);
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, toAta, owner, mintPubkey));
-      tx.add(createTransferInstruction(fromAta, toAta, payer.publicKey, BigInt(amountAtomic.toString())));
+      const toAta = await getAssociatedTokenAddress(mintPubkey, owner, false, tokenProgramId);
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(payer.publicKey, toAta, owner, mintPubkey, tokenProgramId));
+      tx.add(createTransferCheckedInstruction(fromAta, mintPubkey, toAta, payer.publicKey, BigInt(amountAtomic.toString()), decimals, [], tokenProgramId));
     }
     const txId = await sendAndConfirmTransaction(connection, tx, [payer]);
     for (const r of batch) results.push({ wallet: r.wallet, amountAtomic: r.amountAtomic, txId });

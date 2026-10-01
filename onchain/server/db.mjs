@@ -39,12 +39,15 @@ db.exec(`
     -- so pre-graduation rows already in the DB keep reading correctly.
     status TEXT NOT NULL DEFAULT 'minting',
     error_message TEXT,
-    -- JSON array of the backing-asset symbols (e.g. '["XSOL","XHYPE"]') the
-    -- creator picked at launch — 1-3 entries, same list launch.mjs's
-    -- assertAssets validates against. The new pre-market flow needs this
-    -- remembered from launch time: unlike the old model, final pools (and
-    -- therefore which assets to split graduation SOL/COIN across) aren't
-    -- created until graduation, long after launch.
+    -- JSON array of the backing assets the creator picked at launch, e.g.
+    -- '[{"symbol":"XSOL","mint":"Cpk...","decimals":6}]' — 1-3 entries,
+    -- each validated and decimals-resolved on-chain by launch.mjs's
+    -- assertAssets at launch time (any real mint, not just the Hylo
+    -- xSOL/xBTC/xHYPE registry — see docs/token-launch-plan.md). The new
+    -- pre-market flow needs this remembered from launch time: unlike the
+    -- old model, final pools (and therefore which assets to split
+    -- graduation SOL/COIN across) aren't created until graduation, long
+    -- after launch.
     backing_assets TEXT,
     created_at TEXT NOT NULL
   );
@@ -143,12 +146,18 @@ db.exec(`
   -- A token's real final pools once graduated: standard Raydium CPMM, one
   -- per backing asset the launch was configured with (1-3), always locked —
   -- createCpmmPoolAndLock never returns before the lock lands, so unlike
-  -- legacy token_pools' lock_nft_mint this one is never null.
+  -- legacy token_pools' lock_nft_mint this one is never null. decimals is
+  -- carried over from tokens.backing_assets (resolved once, on-chain, at
+  -- launch time) rather than re-fetched — since any real mint is allowed
+  -- now, not just the three well-known Hylo ones, rewards.mjs needs a real
+  -- decimals value for every pool and shouldn't re-hit the RPC for it on
+  -- every cron tick.
   CREATE TABLE IF NOT EXISTS final_pools (
     id TEXT PRIMARY KEY,
     mint_address TEXT NOT NULL REFERENCES tokens(mint_address),
     backing_asset TEXT NOT NULL,
     backing_asset_mint TEXT NOT NULL,
+    decimals INTEGER NOT NULL,
     pool_address TEXT NOT NULL,
     lp_mint TEXT NOT NULL,
     lock_nft_mint TEXT NOT NULL,
@@ -259,6 +268,16 @@ if (rewardRunPoolsSql?.includes('token_pools')) {
   `);
 }
 
+const finalPoolColumns = db.prepare("PRAGMA table_info(final_pools)").all().map((c) => c.name);
+if (!finalPoolColumns.includes('decimals')) {
+  // No NOT NULL/default possible here — SQLite can't backfill a real
+  // per-row value on ALTER. Harmless in practice: there were zero real
+  // final_pools rows in production when this landed (the graduation
+  // feature's first mainnet pools didn't exist yet), and insertFinalPool
+  // always provides a real value for every row created from here on.
+  db.exec('ALTER TABLE final_pools ADD COLUMN decimals INTEGER');
+}
+
 export function insertToken({
   mintAddress, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports, status,
   xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets,
@@ -275,14 +294,6 @@ export function insertToken({
     backingAssets ? JSON.stringify(backingAssets) : null,
     new Date().toISOString()
   );
-}
-
-// Decodes the JSON symbol list insertToken stored — null for any row
-// launched before this column existed (the old model didn't need it, since
-// its final pools were created immediately, not deferred to graduation).
-export function getTokenBackingAssetSymbols(mintAddress) {
-  const row = db.prepare('SELECT backing_assets FROM tokens WHERE mint_address = ?').get(mintAddress);
-  return row?.backing_assets ? JSON.parse(row.backing_assets) : null;
 }
 
 export function updateTokenStatus(mintAddress, status, errorMessage) {
@@ -455,7 +466,7 @@ export function listPremarketTokens() {
   const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE status = 'premarket' ORDER BY created_at ASC`).all();
   return tokens.map((t) => ({
     ...t,
-    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    backingAssets: t.backing_assets ? JSON.parse(t.backing_assets) : null,
     premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'active'").get(t.mint_address),
   }));
 }
@@ -468,7 +479,7 @@ export function getPremarketToken(mintAddress) {
   if (!t) return null;
   return {
     ...t,
-    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    backingAssets: t.backing_assets ? JSON.parse(t.backing_assets) : null,
     premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'active'").get(mintAddress),
   };
 }
@@ -480,16 +491,16 @@ export function listGraduatingTokens() {
   const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE status = 'graduating' ORDER BY created_at ASC`).all();
   return tokens.map((t) => ({
     ...t,
-    backingAssetSymbols: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    backingAssets: t.backing_assets ? JSON.parse(t.backing_assets) : null,
     premarketPool: db.prepare("SELECT * FROM premarket_pools WHERE mint_address = ? AND status = 'closing'").get(t.mint_address),
   }));
 }
 
-export function insertFinalPool({ id, mintAddress, backingAsset, backingAssetMint, poolAddress, lpMint, lockNftMint, swapTx, createTx, lockTx }) {
+export function insertFinalPool({ id, mintAddress, backingAsset, backingAssetMint, decimals, poolAddress, lpMint, lockNftMint, swapTx, createTx, lockTx }) {
   db.prepare(`
-    INSERT INTO final_pools (id, mint_address, backing_asset, backing_asset_mint, pool_address, lp_mint, lock_nft_mint, swap_tx, create_tx, lock_tx, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, mintAddress, backingAsset, backingAssetMint, poolAddress, lpMint, lockNftMint, swapTx ?? null, createTx ?? null, lockTx ?? null, new Date().toISOString());
+    INSERT INTO final_pools (id, mint_address, backing_asset, backing_asset_mint, decimals, pool_address, lp_mint, lock_nft_mint, swap_tx, create_tx, lock_tx, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, mintAddress, backingAsset, backingAssetMint, decimals, poolAddress, lpMint, lockNftMint, swapTx ?? null, createTx ?? null, lockTx ?? null, new Date().toISOString());
 }
 
 export function getFinalPools(mintAddress) {

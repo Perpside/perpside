@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { randomUUID } from 'crypto';
 import BN from 'bn.js';
+import { PublicKey } from '@solana/web3.js';
 import {
   mintCoinToken,
   createPreMarketPool,
@@ -13,6 +14,7 @@ import {
   calculateLaunchFeeLamports,
   redactSecrets,
   listFeeTierPercents,
+  getMintDecimals,
   CLUSTER,
   TOTAL_SUPPLY_WHOLE,
   COIN_DECIMALS,
@@ -24,11 +26,17 @@ import { watchPremarketPool } from './pool-watcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// devnet uses the local stand-in mints (backing-assets.json, static prices —
-// fine, those tokens have no real market). mainnet-beta requires the
-// human-reviewed backing-assets.mainnet.json — see that file's `_verified`
-// field and docs/token-launch-plan.md "Open questions"; refusing to boot
-// with unverified addresses is deliberate, not a bug.
+// This registry is no longer the exclusive set of what a launch CAN use as
+// a backing asset (see assertAssets below — any real mint is accepted now,
+// per the user's own direction) — it's just the featured/default picks
+// /api/backing-assets hands the frontend's 3 pre-filled pills, and a
+// convenient known-price lookup rewards.mjs uses for these specific assets
+// on devnet (see rewards.mjs getKnownDevnetUsdPrice). devnet uses the
+// local stand-in mints (backing-assets.json, static prices — fine, those
+// tokens have no real market). mainnet-beta requires the human-reviewed
+// backing-assets.mainnet.json — see that file's `_verified` field and
+// docs/token-launch-plan.md "Open questions"; refusing to boot with
+// unverified addresses is deliberate, not a bug.
 // backing-assets.mainnet.json carries _verified/_note/_open_question
 // alongside the actual XSOL/XBTC/XHYPE entries for human review — strip the
 // leading-underscore keys before treating the rest as the asset registry,
@@ -58,20 +66,49 @@ const DEFAULT_TARGET_FDV_USD = 5000;
 
 export class LaunchValidationError extends Error {}
 
-// Still validated and stored at launch time even though the new pre-market
-// model doesn't touch a backing asset until graduation — the creator's
-// choice here is what graduation.mjs later splits the recovered SOL/COIN
-// across (see db.mjs tokens.backing_assets and docs/token-launch-plan.md
-// "Graduation").
-function assertAssets(assetSymbols) {
-  if (!Array.isArray(assetSymbols) || assetSymbols.length < 1 || assetSymbols.length > MAX_ASSETS) {
+// Any real mint on this cluster is accepted as a backing asset — not just
+// the three Hylo registry ones. Still validated and resolved at launch
+// time even though the new pre-market model doesn't touch a backing asset
+// until graduation: the creator's choice here (symbol + mint, decimals
+// resolved on-chain right now) is what graduation.mjs later splits the
+// recovered SOL/COIN across (see db.mjs tokens.backing_assets and
+// docs/token-launch-plan.md "Graduation") — resolving decimals once here
+// means nothing downstream (createCpmmPoolAndLock, rewards.mjs) needs to
+// re-fetch or guess it later.
+async function assertAssets(assets) {
+  if (!Array.isArray(assets) || assets.length < 1 || assets.length > MAX_ASSETS) {
     throw new LaunchValidationError(`pick 1-${MAX_ASSETS} backing assets`);
   }
-  return assetSymbols.map((symbol) => {
-    const asset = backingAssets[symbol];
-    if (!asset) throw new LaunchValidationError(`unknown backing asset: ${symbol}`);
-    return { symbol, ...asset };
-  });
+  const seen = new Set();
+  const resolved = [];
+  for (const raw of assets) {
+    const symbol = typeof raw?.symbol === 'string' ? raw.symbol.trim() : '';
+    const mintInput = typeof raw?.mint === 'string' ? raw.mint.trim() : '';
+    if (!symbol || !mintInput) throw new LaunchValidationError('each backing asset needs a symbol and a mint address');
+    if (symbol.length > 10) throw new LaunchValidationError(`${symbol}: symbol too long (max 10 characters)`);
+
+    let mintPubkey;
+    try {
+      mintPubkey = new PublicKey(mintInput);
+    } catch {
+      throw new LaunchValidationError(`${symbol}: "${mintInput}" is not a valid mint address`);
+    }
+    const mint = mintPubkey.toBase58();
+    if (seen.has(mint)) throw new LaunchValidationError('backing assets must be unique');
+    seen.add(mint);
+
+    let decimals;
+    try {
+      decimals = await getMintDecimals(mint);
+    } catch (err) {
+      // getMintDecimals' own message already distinguishes "no real mint
+      // here at all" from "real mint, but Token-2022" — surfaced as-is
+      // rather than flattened into one generic message.
+      throw new LaunchValidationError(`${symbol}: ${err.message}`);
+    }
+    resolved.push({ symbol: symbol.toUpperCase(), mint, decimals });
+  }
+  return resolved;
 }
 
 // Step 1: build the launch fee transfer (creator -> platform, sized to the
@@ -79,15 +116,16 @@ function assertAssets(assetSymbols) {
 // graduation cost, see calculateLaunchFeeLamports). This is the only thing
 // the creator ever signs — everything downstream is platform-sponsored and
 // platform-signed.
-export function prepareFee({ creatorWallet, assetSymbols }) {
+export async function prepareFee({ creatorWallet, assets }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
-  assertAssets(assetSymbols);
-  const feeLamports = calculateLaunchFeeLamports(assetSymbols.length);
+  await assertAssets(assets);
+  const feeLamports = calculateLaunchFeeLamports(assets.length);
   // `cluster` tells the frontend which network this transaction was built
   // against, so it can pass the matching Wallet Standard `chain` string
   // when asking for a signature — hardcoding that client-side would silently
   // go stale the moment CLUSTER flips.
-  return buildFeeTx(creatorWallet, feeLamports).then((txBase64) => ({ txBase64, feeLamports, cluster: CLUSTER }));
+  const txBase64 = await buildFeeTx(creatorWallet, feeLamports);
+  return { txBase64, feeLamports, cluster: CLUSTER };
 }
 
 // Step 2: broadcast the creator-signed fee tx, confirm it landed (that
@@ -99,7 +137,7 @@ export function prepareFee({ creatorWallet, assetSymbols }) {
 // already genuinely tradeable (it's a real Raydium pool from the moment
 // this lands), until that happens.
 export async function launchToken({
-  name, ticker, imageDataUrl, assetSymbols, creatorWallet, signedFeeTxBase64,
+  name, ticker, imageDataUrl, assets, creatorWallet, signedFeeTxBase64,
   xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee,
 }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
@@ -111,7 +149,7 @@ export async function launchToken({
   if (Buffer.byteLength(name, 'utf8') > 32) throw new LaunchValidationError('name is too long for on-chain metadata (max 32 bytes)');
   if (Buffer.byteLength(ticker, 'utf8') > 10) throw new LaunchValidationError('ticker is too long for on-chain metadata (max 10 bytes)');
   if (!signedFeeTxBase64) throw new LaunchValidationError('launch fee payment is required');
-  assertAssets(assetSymbols);
+  const resolvedAssets = await assertAssets(assets);
 
   try {
     await broadcastFeeTx(signedFeeTxBase64);
@@ -139,7 +177,7 @@ export async function launchToken({
   const { mint } = await mintCoinToken({ name, symbol: ticker, metadataUri });
   insertToken({
     mintAddress: mint, name, ticker, imageUrl, metadataUri, creatorWallet, firstBuyLamports: null, status: 'minting',
-    xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets: assetSymbols,
+    xLink, telegramLink, websiteLink, communityFee, creatorFee, buybackFee, backingAssets: resolvedAssets,
   });
 
   try {

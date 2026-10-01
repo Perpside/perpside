@@ -3499,8 +3499,23 @@
       };
 
       var selectedAssets = [];
+      // Mint addresses for custom-searched assets (the fixed xSOL/xBTC/
+      // xHYPE pills resolve their mint from the /api/backing-assets
+      // registry instead, see backingAssetsRegistry below) — any real
+      // token can be a backing asset now, so the backend needs the actual
+      // mint, not just a symbol it can no longer look up in a fixed list.
+      var selectedAssetMints = {};
       var MAX_ASSETS = 3;
       var selectedImage = '';
+
+      var backingAssetsRegistry = null;
+      function fetchBackingAssets() {
+        if (backingAssetsRegistry) return Promise.resolve(backingAssetsRegistry);
+        return fetch(LAUNCH_API_URL + '/api/backing-assets').then(function (r) { return r.json(); }).then(function (d) {
+          backingAssetsRegistry = d;
+          return d;
+        }).catch(function () { return {}; });
+      }
 
       // The pool's actual on-chain trading fee can only be one of Raydium's
       // published tiers (see /api/launch-config feeTiers — custom rates
@@ -3811,7 +3826,7 @@
 
           row.addEventListener('click', function () {
             if (already) return;
-            addAssetPill(key, t.symbol, t.icon);
+            addAssetPill(key, t.symbol, t.icon, t.id);
             closeAddAssetModal();
           });
 
@@ -3839,7 +3854,7 @@
         return span;
       }
 
-      function addAssetPill(key, label, iconUrl) {
+      function addAssetPill(key, label, iconUrl, mint) {
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'launch-asset';
@@ -3859,7 +3874,10 @@
         btn.appendChild(document.createTextNode(label));
         assetGrid.insertBefore(btn, addAssetBtn);
 
-        if (selectedAssets.length < MAX_ASSETS) selectedAssets.push(key);
+        if (selectedAssets.length < MAX_ASSETS) {
+          selectedAssets.push(key);
+          selectedAssetMints[key] = mint;
+        }
         updateAssetGridState();
         updatePreview();
       }
@@ -3873,7 +3891,7 @@
           .then(function (results) {
             if (requestId !== searchRequestId) return;
             var tokens = (Array.isArray(results) ? results : [])
-              .filter(function (t) { return t.symbol; })
+              .filter(function (t) { return t.symbol && t.id; })
               .sort(function (a, b) {
                 var aExact = a.symbol.toUpperCase() === query.toUpperCase();
                 var bExact = b.symbol.toUpperCase() === query.toUpperCase();
@@ -4086,6 +4104,7 @@
       function resetForm() {
         form.reset();
         selectedAssets = [];
+        selectedAssetMints = {};
         selectedImage = '';
         enabled = { community: true, creator: false, buyback: false };
         resetSharesEvenly();
@@ -4117,7 +4136,6 @@
       // (python http.server + node); in production the same Express
       // service serves both, so same-origin relative paths work.
       var LAUNCH_API_URL = (location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:3000' : '';
-      var SUPPORTED_ONCHAIN_ASSETS = ['XSOL', 'XBTC', 'XHYPE'];
       var submitBtn = document.getElementById('launchSubmitBtn');
       var submitLabel = document.getElementById('launchSubmitLabel');
 
@@ -4157,8 +4175,8 @@
       // cost of their launch (mint + N pools, priced server-side) straight
       // to the platform wallet. The platform sponsors everything downstream
       // of that — see docs/token-launch-plan.md "Anti-spam fee".
-      function payLaunchFee(creatorWallet, assetSymbols) {
-        return apiCall('/api/launch/fee-tx', { creatorWallet: creatorWallet, assetSymbols: assetSymbols }).then(function (fee) {
+      function payLaunchFee(creatorWallet, assets) {
+        return apiCall('/api/launch/fee-tx', { creatorWallet: creatorWallet, assets: assets }).then(function (fee) {
           var wallet = window.__perpsideConnectedWallet;
           var account = window.__perpsideConnectedAccount;
           if (!wallet || !account) return Promise.reject(new Error('Wallet disconnected — reconnect and try again.'));
@@ -4239,11 +4257,18 @@
           return;
         }
 
-        var unsupported = selectedAssets.filter(function (a) {
-          return SUPPORTED_ONCHAIN_ASSETS.indexOf(a) === -1;
+        // Any real token can back a launch now — the fixed pills resolve
+        // their mint from the /api/backing-assets registry (prefetched at
+        // form init, see fetchBackingAssets below), a custom search result
+        // already carries its own (see addAssetPill).
+        var registry = backingAssetsRegistry || {};
+        var assets = selectedAssets.map(function (symbol) {
+          var mint = selectedAssetMints[symbol] || (registry[symbol] && registry[symbol].mint);
+          return { symbol: symbol, mint: mint };
         });
-        if (unsupported.length) {
-          showLaunchError('Only xSOL, xBTC, and xHYPE can be launched on-chain right now — remove ' + unsupported.join(', ') + ' to continue.');
+        var missingMint = assets.filter(function (a) { return !a.mint; }).map(function (a) { return a.symbol; });
+        if (missingMint.length) {
+          showLaunchError('Could not resolve a mint address for ' + missingMint.join(', ') + ' — remove and re-add it.');
           return;
         }
 
@@ -4251,14 +4276,14 @@
         submitBtn.disabled = true;
         if (submitLabel) submitLabel.textContent = 'Preparing launch fee…';
 
-        payLaunchFee(creatorWallet, selectedAssets)
+        payLaunchFee(creatorWallet, assets)
           .then(function (signedFeeTxBase64) {
             if (submitLabel) submitLabel.textContent = 'Launching…';
             return apiCall('/api/launch', {
               name: name,
               ticker: ticker,
               imageDataUrl: selectedImage,
-              assetSymbols: selectedAssets,
+              assets: assets,
               creatorWallet: creatorWallet,
               signedFeeTxBase64: signedFeeTxBase64,
               xLink: x || undefined,
@@ -4300,6 +4325,7 @@
       fetchLaunchConfig().then(function (config) {
         populateFeeTiers(config.feeTiers);
       }).catch(function () { /* select stays on its "Loading…" placeholder */ });
+      fetchBackingAssets(); // warm the cache so submit doesn't wait on it
     })();
 
     (function () {

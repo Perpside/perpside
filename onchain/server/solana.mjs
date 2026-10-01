@@ -13,6 +13,8 @@ import {
   AuthorityType,
   getAssociatedTokenAddress,
   getAccount,
+  getMint,
+  TOKEN_2022_PROGRAM_ID,
 } from '@solana/spl-token';
 import {
   PROGRAM_ID as METADATA_PROGRAM_ID,
@@ -636,14 +638,18 @@ export async function swapPlatformSolForAsset({ assetMint, amountInLamports }) {
 // nobody (platform included) can withdraw the underlying liquidity:
 // collectCreatorFees/harvestLockLp remain available for the reward model
 // without that guarantee being at odds with fee collection.
-export async function createCpmmPoolAndLock({ coinMint, assetMint, coinAmountAtomic, assetAmountAtomic, totalRewardFeePercent }) {
+export async function createCpmmPoolAndLock({ coinMint, assetMint, assetDecimals, coinAmountAtomic, assetAmountAtomic, totalRewardFeePercent }) {
   const raydium = await getRaydium();
   const connection = getConnection();
   const payer = getPlatformWallet();
 
   const feeConfig = pickCpmmConfig(totalRewardFeePercent);
   const coinToken = { address: coinMint, decimals: COIN_DECIMALS, programId: TOKEN_PROGRAM_ID.toBase58() };
-  const assetToken = { address: assetMint, decimals: 6, programId: TOKEN_PROGRAM_ID.toBase58() };
+  // Any real mint now (see launch.mjs assertAssets), not just the three
+  // Hylo registry ones that happened to all be 6 decimals — the caller
+  // already resolved and stored this at launch time, so it's passed in
+  // rather than re-fetched here.
+  const assetToken = { address: assetMint, decimals: assetDecimals, programId: TOKEN_PROGRAM_ID.toBase58() };
   const coinIsMintA = isCoinMintA(coinMint, assetMint);
 
   const { execute: executeCreate, extInfo: createExtInfo } = await raydium.cpmm.createPool({
@@ -703,6 +709,34 @@ export async function getTokenBalance(ownerWallet, mint) {
   } catch {
     return new BN(0);
   }
+}
+
+// Any real classic-SPL mint can be a backing asset now (see launch.mjs
+// assertAssets), not just the three Hylo registry ones whose decimals used
+// to be a hardcoded, known-safe 6 — this reads the real value off the mint
+// account instead of assuming. Throws on anything that isn't a real mint
+// on this cluster, which assertAssets relies on to reject a bad address
+// before the creator ever pays the launch fee.
+//
+// Deliberately rejects Token-2022 mints too, rather than silently
+// accepting one that would fail confusingly much later: this file assumes
+// TOKEN_PROGRAM_ID (the classic token program) throughout — ATA
+// derivation for reward payouts (sendTokenBatch), swaps
+// (swapPlatformCpmm/swapPlatformSolForAsset), and pool creation
+// (createCpmmPoolAndLock) all do — and making the entire payout/swap/pool
+// pipeline Token-2022-aware is real, untested scope beyond just reading a
+// decimals value. Failing clearly here, at launch validation time, beats
+// failing unclearly during graduation or a reward run months later.
+export async function getMintDecimals(mintAddress) {
+  const connection = getConnection();
+  const mintPubkey = new PublicKey(mintAddress);
+  const accountInfo = await connection.getAccountInfo(mintPubkey);
+  if (!accountInfo) throw new Error(`no account found at ${mintAddress}`);
+  if (accountInfo.owner.equals(TOKEN_2022_PROGRAM_ID)) {
+    throw new Error(`${mintAddress} is a Token-2022 mint — not supported as a backing asset yet, only classic SPL tokens`);
+  }
+  const info = await getMint(connection, mintPubkey);
+  return info.decimals;
 }
 
 // Second hop of First Buy: swap `amountIn` atomic units of the backing

@@ -1948,3 +1948,94 @@ in the test.
 
 **Still not done:** nothing known — this was the last piece. Frontend
 still out of scope per the user throughout this whole feature.
+
+## Backing assets: any real token, not just xSOL/xBTC/xHYPE (2026-10-01)
+
+The frontend's "Add custom asset" search (Jupiter token search, already
+built) let a creator search for and add *any* real token as a pill, but
+the backend only ever accepted the three Hylo registry symbols — so
+picking anything else failed at submit time with "Only xSOL, xBTC, and
+xHYPE can be launched on-chain right now." Asked the user how to resolve
+the mismatch (restrict the UI search to match the backend, or expand the
+backend to match the UI); they chose the latter — any real mint, up to 3
+per launch, backend restriction removed.
+
+**launch.mjs assertAssets, rewritten.** Took `assetSymbols` (an array of
+symbol strings, matched against the fixed `backing-assets.json`/
+`.mainnet.json` registry) → now takes `assets` (an array of
+`{symbol, mint}`), validates each mint is a real, well-formed base58
+address, fetches its *real* decimals on-chain (`solana.mjs
+getMintDecimals`, new), and rejects anything that isn't a real mint on
+this cluster — all before the creator ever pays the launch fee. Resolved
+once here (symbol + mint + decimals) and stored in `tokens.backing_assets`
+(shape changed accordingly — was a bare symbol array, now full objects),
+so nothing downstream (`createCpmmPoolAndLock`, `rewards.mjs`) needs to
+re-fetch or assume decimals later. `final_pools` gained a matching
+`decimals` column (migrated in, nullable — there were zero real rows in
+production when this landed) for the same reason on the reward-cron side.
+
+**Three real hardcoded-6-decimals assumptions found and fixed** — all a
+direct consequence of the old model only ever using the three Hylo
+registry assets, which all happen to be 6 decimals: `createCpmmPoolAndLock`
+(solana.mjs) took a real `assetDecimals` param instead of hardcoding 6;
+`graduation.mjs` resolves each asset's decimals from the stored
+`token.backingAssets` (a `.find()` by mint) instead of a registry lookup
+that no longer applies to an arbitrary mint; `rewards.mjs`'s
+`backingAssetInfo(symbol)` registry lookup is gone entirely, replaced by
+reading `pool.backing_asset_mint`/`pool.decimals` directly off the
+`final_pools` row that's already loaded.
+
+**Devnet USD pricing, which depended on the registry's static prices, was
+also no longer safe to assume for an arbitrary asset.** `fetchAssetUsdPrice`
+now takes a mint directly (not an `asset` object) and keeps a *small*
+known-price table read straight from `backing-assets.json` — Perpside's
+own pre-minted devnet stand-in assets, kept purely as a testing
+convenience — for devnet; anything else on devnet (or anything at all on
+mainnet) goes through the existing live Jupiter lookup, which already
+resiliently returns null (skip this tick) rather than throwing.
+
+**Token-2022 mints are deliberately rejected, not silently half-supported.**
+Properly supporting them would mean threading the correct token program
+through the *entire* money-movement pipeline — ATA derivation for reward
+payouts (`sendTokenBatch`), both swap functions, and pool creation — not
+just reading a decimals value; real, untested scope well beyond this
+pass, and this session is also presently devnet-SOL-constrained from
+extensive earlier testing, so it couldn't be verified even if built.
+`getMintDecimals` reads the mint account's real owner and throws a clear,
+specific error for a Token-2022 mint — caught at launch validation time,
+before any fee is charged, rather than failing confusingly during
+graduation or a reward run much later. "Any real token" currently means
+"any real classic-SPL token."
+
+**Frontend (index.html), explicitly in scope this time per the user.**
+`selectedAssets` stays exactly what it already was (an array of symbol
+strings — unchanged everywhere it's used for rendering/toggling, kept
+deliberately low-risk) with a new parallel `selectedAssetMints` map
+(symbol → mint) populated only for custom-searched assets (`addAssetPill`
+already had the mint from the search result, `t.id`, and was simply
+discarding it before). At submit time, every selected symbol's mint is
+resolved — from `selectedAssetMints` for custom ones, or from the
+`/api/backing-assets` registry (prefetched at form init) for the three
+fixed pills — with a clear client-side error if anything fails to
+resolve, before any signature is ever requested. The old
+`SUPPORTED_ONCHAIN_ASSETS` client-side gate is gone.
+
+**Verified for real, within what devnet SOL allowed.** This session's
+extensive earlier testing had largely drained both the platform wallet
+and the devnet test-creator wallet, and the devnet faucet (tried twice)
+returned a 500 both times — so a full launch-through-graduation test with
+an arbitrary asset wasn't possible this pass, and isn't claimed as tested.
+What *was* verified for real, through the actual `prepareFee`/
+`assertAssets` code path (not a substitute): a real arbitrary devnet mint
+(one of this session's own earlier test coins, not in any registry) is
+accepted and correctly resolves its real decimals; a well-formed-but-empty
+address and a malformed address are each rejected with a distinct, clear
+message; a well-known external devnet mint (devnet USDC) also resolves
+correctly, confirming this isn't limited to mints this project happens to
+control; and a mix of one registry asset (xSOL) plus one arbitrary asset
+in the same request correctly computes a 2-asset fee. The downstream
+pieces (`createCpmmPoolAndLock`'s `assetDecimals` param,
+`graduation.mjs`'s resolved-asset lookup) are small, mechanical changes
+to code paths already proven correct earlier in this document with the
+registry assets — not independently re-verified end-to-end here, and
+flagged as the one honest gap in this pass rather than left unstated.

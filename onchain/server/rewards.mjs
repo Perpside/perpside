@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { PublicKey } from '@solana/web3.js';
 import BN from 'bn.js';
 import {
@@ -12,7 +15,6 @@ import {
   COIN_DECIMALS,
   CPMM_POOL_AUTHORITY_FOR_CLUSTER,
 } from './solana.mjs';
-import { listBackingAssets } from './launch.mjs';
 import {
   listCompleteTokens,
   getIncompleteRewardRun,
@@ -51,22 +53,32 @@ const DUST_THRESHOLD_USD = 1;
 const PLATFORM_FEE_FRACTION = 0.10;
 const REVENUE_WALLET = '7qRCnebUspWNLEFbmgcvWrrJq28gHV8CjdqPfshpZxfj';
 
-const backingAssets = listBackingAssets();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-function backingAssetInfo(symbol) {
-  const asset = backingAssets[symbol];
-  if (!asset) throw new Error(`unknown backing asset: ${symbol}`);
-  return asset;
-}
-
-// Devnet's stand-in assets have no real market — mainnet fetches a live
-// price and simply skips this token's check for the current cron tick on
-// failure (returns null) rather than throwing, since there's always a next
-// tick.
-async function fetchAssetUsdPrice(asset) {
-  if (CLUSTER !== 'mainnet-beta') return asset.usdPrice;
+// Any real mint can be a backing asset now (see launch.mjs assertAssets),
+// not just the three Hylo registry ones — devnet has no real market for
+// ANY token though, so this is purely a testing convenience: a static
+// price lookup, keyed by mint, for Perpside's own pre-minted devnet
+// stand-in assets (see backing-assets.json / setup-backing-assets.mjs).
+// Anything not in this table (a different devnet asset, or anything at
+// all on mainnet) falls through to the live Jupiter lookup below.
+const DEVNET_KNOWN_PRICES_BY_MINT = (() => {
   try {
-    const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${asset.mint}`);
+    const registry = JSON.parse(fs.readFileSync(path.join(__dirname, 'backing-assets.json')));
+    return Object.fromEntries(Object.values(registry).map((a) => [a.mint, a.usdPrice]));
+  } catch {
+    return {};
+  }
+})();
+
+// Devnet's stand-in assets (and anything else on devnet) have no real
+// market — mainnet fetches a live price and simply skips this token's
+// check for the current cron tick on failure (returns null) rather than
+// throwing, since there's always a next tick.
+async function fetchAssetUsdPrice(assetMint) {
+  if (CLUSTER !== 'mainnet-beta') return DEVNET_KNOWN_PRICES_BY_MINT[assetMint] ?? null;
+  try {
+    const res = await fetch(`https://lite-api.jup.ag/tokens/v2/search?query=${assetMint}`);
     if (!res.ok) return null;
     const [token] = await res.json();
     return token && typeof token.usdPrice === 'number' ? token.usdPrice : null;
@@ -97,8 +109,7 @@ function atomicToWhole(amountAtomic, decimals) {
 async function computeTokenPendingFeesUsd(token) {
   let totalUsd = 0;
   for (const pool of token.pools) {
-    const asset = backingAssetInfo(pool.backing_asset);
-    const usdPrice = await fetchAssetUsdPrice(asset);
+    const usdPrice = await fetchAssetUsdPrice(pool.backing_asset_mint);
     if (usdPrice == null) return null;
 
     let pending;
@@ -117,7 +128,7 @@ async function computeTokenPendingFeesUsd(token) {
     const assetPerCoin = coinIsMintA ? pending.priceBPerA : 1 / pending.priceBPerA;
     const coinSideInAssetWhole = atomicToWhole(coinSideAtomic, COIN_DECIMALS) * assetPerCoin;
 
-    totalUsd += atomicToWhole(assetSideAtomic, asset.decimals) * usdPrice;
+    totalUsd += atomicToWhole(assetSideAtomic, pool.decimals) * usdPrice;
     totalUsd += coinSideInAssetWhole * usdPrice;
   }
   return totalUsd;
@@ -242,7 +253,6 @@ async function payPlatformRevenue({ runPoolId, backingAssetMint, amountAtomic })
 }
 
 async function processPool(run, token, pool) {
-  const asset = backingAssetInfo(pool.backing_asset);
   let runPool = getRewardRunPools(run.id).find((rp) => rp.pool_id === pool.id);
   if (!runPool) {
     const id = insertRewardRunPool({ runId: run.id, poolId: pool.id, backingAsset: pool.backing_asset, backingAssetMint: pool.backing_asset_mint });
@@ -293,7 +303,7 @@ async function processPool(run, token, pool) {
 
     const remainderAtomic = harvestedAtomic.sub(platformFeeAtomic);
     const { communityAtomic, creatorAtomic, buybackAtomic } = splitByRewardModel(remainderAtomic, token);
-    const usdPrice = (await fetchAssetUsdPrice(asset)) ?? 0;
+    const usdPrice = (await fetchAssetUsdPrice(pool.backing_asset_mint)) ?? 0;
     // CPMM vaults are owned by one PDA shared across every pool on the
     // program (see solana.mjs CPMM_POOL_AUTHORITY_FOR_CLUSTER's own
     // comment), not by the pool's own address — excluding pool_address
@@ -303,7 +313,7 @@ async function processPool(run, token, pool) {
 
     await distributeCommunity({
       runPoolId: runPool.id, mintAddress: token.mint_address, backingAssetMint: pool.backing_asset_mint,
-      decimals: asset.decimals, usdPrice, amountAtomic: communityAtomic, excludeOwners,
+      decimals: pool.decimals, usdPrice, amountAtomic: communityAtomic, excludeOwners,
     });
     await payCreator({ runPoolId: runPool.id, backingAssetMint: pool.backing_asset_mint, creatorWallet: token.creator_wallet, amountAtomic: creatorAtomic });
     await executeBuyback({ runPoolId: runPool.id, poolAddress: pool.pool_address, coinMint: token.mint_address, backingAssetMint: pool.backing_asset_mint, amountAtomic: buybackAtomic });

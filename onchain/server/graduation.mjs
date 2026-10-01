@@ -10,7 +10,6 @@
 import { randomUUID } from 'crypto';
 import BN from 'bn.js';
 import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted } from './solana.mjs';
-import { listBackingAssets } from './launch.mjs';
 import {
   listPremarketTokens,
   listGraduatingTokens,
@@ -47,6 +46,12 @@ function splitAtomicEvenly(total, n) {
 async function processAsset(token, row, totalRewardFeePercent) {
   if (row.status === 'pool_created') return;
   try {
+    // From token.backingAssets (resolved on-chain at launch time, see
+    // launch.mjs assertAssets) rather than re-fetched here — any real mint
+    // now, not just the three Hylo registry ones that could assume 6.
+    const assetInfo = (token.backingAssets || []).find((a) => a.mint === row.backing_asset_mint);
+    if (!assetInfo) throw new Error(`no decimals on record for backing asset ${row.backing_asset_mint} — missing from token.backingAssets`);
+
     let swapTx = row.swap_tx;
     let assetAmountAtomic = row.asset_amount_atomic ? new BN(row.asset_amount_atomic) : null;
     if (!swapTx) {
@@ -62,6 +67,7 @@ async function processAsset(token, row, totalRewardFeePercent) {
     const poolResult = await createCpmmPoolAndLock({
       coinMint: token.mint_address,
       assetMint: row.backing_asset_mint,
+      assetDecimals: assetInfo.decimals,
       coinAmountAtomic: new BN(row.coin_share_atomic),
       assetAmountAtomic,
       totalRewardFeePercent,
@@ -73,6 +79,7 @@ async function processAsset(token, row, totalRewardFeePercent) {
       mintAddress: token.mint_address,
       backingAsset: row.backing_asset,
       backingAssetMint: row.backing_asset_mint,
+      decimals: assetInfo.decimals,
       poolAddress: poolResult.poolId,
       lpMint: poolResult.lpMint,
       lockNftMint: poolResult.lockNftMint,
@@ -135,25 +142,26 @@ async function processToken(token) {
 
   let assetRows = getGraduationRunAssets(run.id);
   if (assetRows.length === 0) {
-    const symbols = token.backingAssetSymbols;
-    if (!symbols || symbols.length === 0) {
+    // Resolved and stored once, on-chain, at launch time (see launch.mjs
+    // assertAssets) — any real mint the creator picked, not looked up
+    // against a fixed registry.
+    const assets = token.backingAssets;
+    if (!assets || assets.length === 0) {
       updateGraduationRunStatus(run.id, 'failed', 'no backing_assets recorded for this token');
       throw new Error(`graduation run ${run.id}: no backing_assets recorded for ${token.mint_address}`);
     }
-    const registry = listBackingAssets();
-    const solShares = splitAtomicEvenly(new BN(run.sol_raised_lamports), symbols.length);
-    const coinShares = splitAtomicEvenly(new BN(run.coin_recovered_atomic), symbols.length);
-    assetRows = symbols.map((symbol, i) => {
-      const asset = registry[symbol];
+    const solShares = splitAtomicEvenly(new BN(run.sol_raised_lamports), assets.length);
+    const coinShares = splitAtomicEvenly(new BN(run.coin_recovered_atomic), assets.length);
+    assetRows = assets.map((asset, i) => {
       const id = insertGraduationRunAsset({
         runId: run.id,
-        backingAsset: symbol,
+        backingAsset: asset.symbol,
         backingAssetMint: asset.mint,
         solShareLamports: solShares[i],
         coinShareAtomic: coinShares[i],
       });
       return {
-        id, backing_asset: symbol, backing_asset_mint: asset.mint,
+        id, backing_asset: asset.symbol, backing_asset_mint: asset.mint,
         sol_share_lamports: solShares[i].toString(), coin_share_atomic: coinShares[i].toString(),
         swap_tx: null, asset_amount_atomic: null, status: 'pending',
       };

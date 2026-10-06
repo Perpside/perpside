@@ -2180,3 +2180,64 @@ confined to how much gets handed to the first of those two calls — but
 a composed end-to-end run wasn't affordable this pass (same devnet-SOL
 constraint as the Token-2022 gap above). Flagged rather than silently
 assumed correct.
+
+## Real mainnet launch failure: RPC read-after-write race between the fee tx and the very next one (2026-10-06)
+
+The first real mainnet launch attempt since the fee fix above: the
+creator's wallet showed the fee transaction landing successfully, then
+the launch itself failed with a generic error. Real production logs
+had the actual stack — it failed inside `uploadImage` (Irys/Arweave
+upload, the very next real transaction after the fee lands), with:
+
+```
+SendTransactionError: Simulation failed.
+Transaction simulation failed: Attempt to debit an account but found
+no record of a prior credit.
+```
+
+**Root cause, confirmed by reproducing it directly against production.**
+`broadcastFeeTx` only waits for `getSignatureStatuses` to report
+`'confirmed'`/`'finalized'` — proof that *some* RPC backend has seen the
+fee land, not that the *next* RPC call will hit that same backend.
+Helius (like most providers) load-balances across multiple nodes behind
+one URL; the Irys funding transaction immediately following the fee
+transfer can land on a node that hasn't caught up yet, which sees the
+platform wallet as if the fee had never arrived — hence "no record of a
+prior credit" despite the payment having genuinely, successfully
+landed moments earlier. Confirmed for real: manually re-ran the exact
+same Irys funding call against the same (already-credited) platform
+wallet a few minutes later and it succeeded instantly, and Irys's own
+real price for an upload is trivial (≈2,000–23,000 lamports for
+10 KB–1 MB) — nowhere near large enough to be an insufficient-funds
+issue on its own merits.
+
+**Fix: wait for *this* connection's own view of the platform wallet to
+catch up before spending against it**, instead of trusting confirmation
+status from whichever node happened to answer that call. New
+`waitForPlatformBalance(minLamports)` in `solana.mjs` polls
+`connection.getBalance` (same connection used for everything else) up
+to 10 times, 500ms apart, and `launchToken` (`launch.mjs`) calls it
+right after `broadcastFeeTx` succeeds, waiting for the balance to reach
+`calculateLaunchFeeLamports()` — the same floor the fee was sized to
+cover — before `uploadImage`/`mintCoinToken`/`createPreMarketPool` ever
+spend against it. A failure here is reported honestly as "try again in
+a moment", not folded into the fee-payment error path, since the
+payment itself already succeeded by this point.
+
+**The specific creator who hit this is not out any money, but is
+currently stuck.** Traced the real transaction: wallet
+`HjwJmEvic5igeCqvzog3mF1b1Rjd3haWasdfCASzXKo2` paid the fee
+(196,819,050 lamports) to the platform wallet
+(`BfuQmDmyuHjkzVMHYvfU2QQEuiwuwujFfU2tZFyo5dDP`) at 2026-10-06T16:47:51Z;
+confirmed zero rows in the production `tokens` table, so the failure
+happened before `insertToken` ever ran — nothing partial exists to
+clean up, but that fee is sitting unused in the platform wallet with no
+token created against it. Re-attempting the launch from the frontend
+right now would charge a *second* fee rather than resuming the first
+(the signed fee transaction can't be meaningfully resubmitted once its
+blockhash has expired, and `launchToken` always takes a
+`signedFeeTxBase64` as input rather than resuming from an
+already-landed payment) — a real gap in retry-safety beyond this
+specific race, not something this pass fixes. Flagging rather than
+quietly deciding: whether to manually refund that creator, or treat it
+as platform float, is a product/support call outside this pass's scope.

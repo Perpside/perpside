@@ -12,6 +12,7 @@ import {
   broadcastSignedTx,
   buildFirstBuyTx,
   calculateLaunchFeeLamports,
+  waitForPlatformBalance,
   redactSecrets,
   listFeeTierPercents,
   getMintInfo,
@@ -153,6 +154,17 @@ export async function launchToken({
     await broadcastFeeTx(signedFeeTxBase64);
   } catch (err) {
     throw new LaunchValidationError('launch fee payment failed: ' + redactSecrets(err.message));
+  }
+  try {
+    // The fee itself already landed at this point — this just waits for
+    // this connection's own view of the platform wallet to catch up before
+    // spending against it (see waitForPlatformBalance's own comment on the
+    // real race this closes). Not folded into the try/catch above: a
+    // failure here isn't a payment failure and shouldn't be reported as
+    // one.
+    await waitForPlatformBalance(calculateLaunchFeeLamports());
+  } catch (err) {
+    throw new LaunchValidationError(redactSecrets(err.message));
   }
 
   // Image/metadata need to be uploaded *before* minting now — the coin's

@@ -380,6 +380,30 @@ export function broadcastFeeTx(signedTxBase64) {
   return broadcastSignedTx(signedTxBase64, 'fee transaction');
 }
 
+// Closes a real race hit in production: broadcastFeeTx's own
+// 'confirmed'/'finalized' check only proves SOME RPC node has seen the fee
+// land — a load-balanced provider (Helius included) can route the very next
+// call (uploadImage's Irys funding, moments later in launchToken) to a
+// different backend node that hasn't caught up yet, which saw the platform
+// wallet as if the fee had never landed at all. Caught for real as
+// "Simulation failed... Attempt to debit an account but found no record of
+// a prior credit" on that next transaction, despite the fee having
+// genuinely, successfully landed. Polls this connection's own view of the
+// platform wallet's balance until it's caught up, instead of trusting
+// confirmation status on a connection that may not be the one that saw it.
+export async function waitForPlatformBalance(minLamports, { attempts = 10, intervalMs = 500 } = {}) {
+  const connection = getConnection();
+  const platform = getPlatformWallet();
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const balance = await connection.getBalance(platform.publicKey);
+    if (balance >= minLamports) return balance;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(
+    `platform wallet balance hasn't caught up to the just-paid fee yet (wanted >= ${minLamports} lamports) — the fee transaction landed, but this RPC connection hasn't seen it yet; try again in a moment`
+  );
+}
+
 // Mints the coin, platform wallet pays rent + holds the full initial supply
 // until it's distributed into a pool by createPreMarketPool (and, later,
 // createCpmmPoolAndLock at graduation). Also creates

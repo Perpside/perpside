@@ -2294,3 +2294,62 @@ previous `waitForPlatformBalance` fix (part of the prior entry) is kept
 — it's not wrong, just insufficient on its own; still useful defense
 for the separate, genuine case where Perpside's *own* connection
 hasn't caught up yet.
+
+## Same error a third time — the real mechanism was a commitment-level mismatch, not a stuck node (2026-10-06)
+
+The no-cache fix above didn't resolve it either — same creator, same
+exact error, immediately after that fix was live too. The "stuck
+load-balanced node" theory was wrong, or at least incomplete: a fresh
+connection on every call still failed. User's own instinct was close —
+not "needs separate Irys funding", but *something* about how Irys talks
+to the chain really was different from the rest of this codebase.
+
+**Found the actual mechanism in `@irys/upload-solana`'s real source**
+(`token.js`): `SolanaConfig` hardcodes `finality = 'finalized'` by
+default — every Solana call it makes (fetching a blockhash, simulating
+and sending its funding transaction) reads chain state as of the
+**finalized** slot. Finalization is a real, mechanical ~13–20+ seconds
+behind **confirmation** on Solana (several further slots of
+supermajority voting) — not a provider quirk, just how the protocol
+works. Perpside's own `getConnection()` uses `'confirmed'`
+*everywhere* (`solana.mjs`) — so the platform wallet's fee credit was
+already visible to the rest of this codebase (including
+`waitForPlatformBalance`, which is why *that* check kept passing)
+while Irys's own finalized-commitment connection genuinely had no
+record of it yet, because `uploadImage` runs only ~1–2 seconds after
+the fee lands. This also explains why every one of this session's
+manual reproductions succeeded: they all ran minutes after the
+original transaction, well past real finalization.
+
+**Confirmed directly, not inferred a third time:** `SolanaConfig`'s
+`finality` is configurable via the builder's own
+`withTokenOptions({ finality })`, and it's genuinely plumbed through —
+checked by building an uploader with `{ finality: 'confirmed' }` and
+reading back both `tokenConfig.finality` and the *underlying
+`Connection`'s own `.commitment` field*: both reported `'confirmed'`,
+not the default `'finalized'`.
+
+**Fix: make Irys use the same commitment level as the rest of this
+codebase**, instead of retrying around a mismatch. `getIrys()` now
+chains `.withTokenOptions({ finality: 'confirmed' })` into the builder.
+The previous fixes (no caching, retry-with-backoff) are kept as
+layered defense — none of them were wrong, the caching fix in
+particular is independently worth keeping — but this is the one that
+addresses the actual mechanism. Retry budget scaled back down (5
+attempts, 2s apart) now that the real gap it's covering is normal
+`'confirmed'`-level propagation variance (sub-second, typically) rather
+than waiting out finalization.
+
+**Verified for real.** Rebuilt the uploader with the new option against
+real devnet and confirmed `tokenConfig.finality === 'confirmed'` and
+the live `Connection.commitment === 'confirmed'` — not just that the
+option was accepted without erroring. Then ran a full real
+`uploadImage` call end to end: succeeded in 1.2 seconds. Three failures
+in a row on this one is a real lesson in this session's own terms: the
+first two fixes treated symptoms that were each independently true and
+worth fixing (a genuine RPC-visibility gap on Perpside's own
+connection; a genuinely bad practice caching a finicky SDK object for
+a server's entire lifetime) without being *the* cause of what the user
+was actually hitting — found only by finally reading the dependency's
+own source for its commitment handling instead of continuing to guess
+at network/infrastructure explanations.

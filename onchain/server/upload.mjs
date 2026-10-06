@@ -25,21 +25,44 @@ const GATEWAY = CLUSTER === 'mainnet-beta' ? 'https://gateway.irys.xyz' : 'https
 // cached connection being stuck on a lagging node, not a one-off race.
 // Rebuilding per call means a bad routing decision can't outlive a single
 // upload.
+// Real root cause of the "no record of a prior credit" failure, found by
+// reading @irys/upload-solana's actual source (token.js): SolanaConfig
+// hardcodes `finality = 'finalized'` by default — EVERY Solana call it
+// makes (fetching the blockhash, simulating/sending the funding tx) reads
+// chain state as of the FINALIZED slot, not CONFIRMED. Finalization lags
+// confirmation by a real, mechanical ~13-20+ seconds on Solana (multiple
+// further slots of supermajority voting) — that's not a load-balancer
+// quirk, it's how the protocol works. Perpside's own `getConnection()`
+// uses 'confirmed' everywhere (see solana.mjs), so the platform wallet's
+// fee credit was already visible to the rest of this codebase while
+// Irys's own finalized-commitment connection still genuinely had no
+// record of it yet — explaining both the original failure (uploadImage
+// runs within ~1-2s of the fee landing) and why manually re-running the
+// exact same call minutes later always succeeded (by then it really was
+// finalized). `withTokenOptions({ finality: 'confirmed' })` overrides that
+// default so Irys's own commitment level matches the rest of this
+// codebase, fixing the actual mismatch instead of just waiting it out.
 async function getIrys() {
   const payer = getPlatformWallet();
-  const builder = Uploader(Solana).withWallet(payer.secretKey).withRpc(RPC_URL);
+  const builder = Uploader(Solana)
+    .withWallet(payer.secretKey)
+    .withRpc(RPC_URL)
+    .withTokenOptions({ finality: 'confirmed' });
   return (CLUSTER === 'mainnet-beta' ? builder.mainnet() : builder.devnet()).build();
 }
 
 // Irys nodes require a funded balance covering the upload's byte price —
 // top up the platform wallet's Irys balance if it's short, with a small
-// buffer so back-to-back launches don't each pay a separate fund tx.
-// Retried on the same transient-node-lag error class getIrys's own comment
-// explains: each retry calls getIrys() again (a fresh uploader/connection,
-// not the same stuck one), rather than reusing whatever connection just
-// failed.
+// buffer so back-to-back launches don't each pay a separate fund tx. Still
+// retried a few times on this specific error class as defense in depth —
+// getIrys's 'confirmed' fix above addresses the real, mechanical cause,
+// but this costs nothing extra on the common path (returns immediately on
+// success) and protects against any remaining, smaller propagation gap.
+const FUND_RETRY_ATTEMPTS = 5;
+const FUND_RETRY_DELAY_MS = 2000;
+
 async function ensureFunded(byteLength) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < FUND_RETRY_ATTEMPTS; attempt++) {
     const irys = await getIrys();
     const price = await irys.getPrice(byteLength);
     const balance = await irys.getBalance();
@@ -49,8 +72,8 @@ async function ensureFunded(byteLength) {
       return irys;
     } catch (err) {
       const message = `${err?.message || ''} ${err?.transactionMessage || ''}`;
-      if (!/prior credit|Simulation failed/i.test(message) || attempt === 3) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      if (!/prior credit|Simulation failed/i.test(message) || attempt === FUND_RETRY_ATTEMPTS - 1) throw err;
+      await new Promise((resolve) => setTimeout(resolve, FUND_RETRY_DELAY_MS));
     }
   }
 }

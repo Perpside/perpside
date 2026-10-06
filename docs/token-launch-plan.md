@@ -2241,3 +2241,56 @@ already-landed payment) — a real gap in retry-safety beyond this
 specific race, not something this pass fixes. Flagging rather than
 quietly deciding: whether to manually refund that creator, or treat it
 as platform float, is a product/support call outside this pass's scope.
+
+## Same error again after the fix above — the real cause was a stuck, server-lifetime-cached connection (2026-10-06)
+
+The creator from the previous entry was refunded and retried — same
+exact failure, same exact line (`uploadImage`), even with
+`waitForPlatformBalance` from the previous fix already live. That fix
+wasn't wrong, it was aimed at the wrong connection.
+
+**Real root cause, found by reading `@irys/upload-solana`'s actual
+source (`token.js`), not assumed:** `getProvider()` does
+`this.providerInstance ??= new Connection(this.providerUrl, ...)` —
+Irys's own SDK builds and caches *its own* `Connection` object, pointed
+at the same `RPC_URL` Perpside's own code uses, but that's a different
+object from Perpside's `getConnection()` singleton. A load-balanced
+provider (Helius) can route that connection's first request to a
+different backend node, and once pinned (HTTP keep-alive), it stays
+pinned for the object's lifetime. `upload.mjs`'s old `getIrys()` built
+this uploader **once** and cached it (`irysSingleton`) for the entire
+server process's lifetime — so if that one connection got pinned to a
+node that's lagging (or just unlucky at boot time), *every single
+launch* through that running process would hit the same "no record of
+a prior credit" error, indefinitely, not as an occasional transient
+blip. This explains why the error repeated identically on a second,
+independent attempt: it wasn't bad luck twice, it was the same stuck
+connection both times.
+
+**Confirmed directly, not inferred:** re-running the identical Irys
+funding call via a *fresh* `node` process (`railway ssh`, new
+connection, same `RPC_URL`, same account) against the real platform
+wallet succeeded instantly both times it was tried. Only the long-lived
+server process's own cached connection was ever stuck.
+
+**Fix: stop caching the Irys uploader at all.** `getIrys()` now builds
+a fresh `Uploader(...).build()` — and so a fresh underlying
+`Connection` — on every call, so a bad routing decision can't outlive
+one upload. `ensureFunded` also retries up to 4 times with a 1.5s
+backoff specifically on this error class (`prior credit` /
+`Simulation failed` in the thrown error), each retry getting an
+entirely new connection via a fresh `getIrys()` call rather than
+reusing whatever just failed — defense in depth on top of removing the
+cache, not a replacement for it.
+
+**Verified for real.** Rebuilding the uploader per call isn't free
+(a `.build()` round trip), but launches are infrequent enough that this
+doesn't matter — and reliability here matters far more than shaving a
+network round trip off an already-multi-transaction flow. Ran the
+actual `uploadImage`/`uploadMetadata` functions for real against devnet
+with a real tiny PNG: both uploaded successfully, and the returned
+gateway URL resolved (redirected, HTTP 307, to the real asset). The
+previous `waitForPlatformBalance` fix (part of the prior entry) is kept
+— it's not wrong, just insufficient on its own; still useful defense
+for the separate, genuine case where Perpside's *own* connection
+hasn't caught up yet.

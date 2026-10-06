@@ -1,7 +1,9 @@
 // Orchestrates graduation end to end: detects a fully-depleted pre-market
 // position (see solana.mjs isPreMarketPoolDepleted), closes it, splits the
-// recovered SOL/COIN across the launch's backing assets, swaps each SOL
-// share, and seeds + locks one CPMM pool per asset. Mirrors rewards.mjs's
+// recovered SOL and the platform's held-back COIN reserve (see
+// calibration.mjs's own comment on the 79.31%/20.69% split) across the
+// launch's backing assets, swaps each SOL share, and seeds + locks one
+// CPMM pool per asset. Mirrors rewards.mjs's
 // layering (solana.mjs holds single on-chain operations, this file composes
 // them) *and* its resumability pattern (graduation_runs/graduation_run_assets
 // mirror reward_runs/reward_run_pools) — graduation is several sequential
@@ -10,7 +12,7 @@
 import { randomUUID } from 'crypto';
 import BN from 'bn.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted, graduationReserveLamports } from './solana.mjs';
+import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted, graduationReserveLamports, getTokenBalance, getPlatformWallet } from './solana.mjs';
 import {
   listPremarketTokens,
   listGraduatingTokens,
@@ -173,7 +175,20 @@ async function processToken(token) {
       throw new Error(`graduation run ${run.id}: no backing_assets recorded for ${token.mint_address}`);
     }
     const solShares = splitAtomicEvenly(new BN(run.sol_raised_lamports), assets.length);
-    const coinShares = splitAtomicEvenly(new BN(run.coin_recovered_atomic), assets.length);
+    // NOT run.coin_recovered_atomic — that's only what closePreMarketPool's
+    // position handed back, which is close to zero at genuine full
+    // depletion (a single-sided position converts entirely to the *other*
+    // token by the time it reaches the ceiling tick — see calibration.mjs's
+    // own solAtDepletion). The real seed for the final pools' coin side is
+    // the 20.69% of supply calibratePreMarketPool deliberately never put in
+    // the pre-market position in the first place (PREMARKET_CURVE_COIN_WHOLE
+    // vs TOTAL_SUPPLY_WHOLE, pump.fun's own real split) — it's been sitting
+    // in the platform wallet's own ATA since mintCoinToken. Reading the
+    // real current balance here (rather than hardcoding that 20.69%) also
+    // naturally folds in whatever dust closePreMarketPool did return,
+    // without double-counting or leaving it stranded.
+    const coinBalance = await getTokenBalance(getPlatformWallet().publicKey.toBase58(), token.mint_address);
+    const coinShares = splitAtomicEvenly(coinBalance, assets.length);
     assetRows = assets.map((asset, i) => {
       const id = insertGraduationRunAsset({
         runId: run.id,

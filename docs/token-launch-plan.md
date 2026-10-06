@@ -2437,3 +2437,55 @@ mainnet launch that exists) and a synthetic `'complete'` token side by
 side, in a real headless browser pointed at the real `/api/tokens`
 response shape: both cards render, only the pre-market one carries the
 badge, zero console errors.
+
+## Real bug found while answering a question, not while testing: graduation would have seeded final pools with almost no COIN (2026-10-06)
+
+User asked what market cap looks like right before vs. right after
+graduation, and whether there's a gap. Answering it properly meant
+actually tracing where a final pool's COIN-side liquidity comes from —
+and it doesn't come from where the code currently thinks it does.
+
+**The bug.** `calibration.mjs` deposits only `PREMARKET_CURVE_COIN_WHOLE`
+(793.1M of 1B total supply — pump.fun's own 79.31% split) into the
+pre-market position; the other 20.69% (206.9M) is deliberately never
+deposited at all, left sitting in the platform wallet's own ATA
+specifically to seed the final pools at graduation — the calibration
+file's own comment already said as much. But `graduation.mjs` sourced
+the final pools' COIN side from `run.coin_recovered_atomic` — literally
+whatever `closePreMarketPool` got back from closing the *position*,
+which is close to zero at genuine full depletion (a single-sided CLMM
+position converts entirely into the *other* token by the ceiling tick —
+same math `calibratePreMarketPool`'s own `solAtDepletion` uses). The
+held-back 206.9M was never referenced anywhere in `graduation.mjs`.
+Every graduation would have tried to seed a CPMM pool with ~0 on one
+side — either `createPool` rejects it outright, or it somehow lands and
+opens at a wildly wrong price. Caught before any real token had reached
+graduation yet (none had — `PRPS`, the one live launch, is still
+pre-market), purely from reasoning through the user's question.
+
+**Confirmed empirically, not just by reading the code:** checked the
+real platform wallet's `PRPS` balance on production — **206,900,000.000127**,
+matching the predicted 20.69% reserve almost exactly (the `.000127` is
+ATA/mint rounding dust).
+
+**Fix.** `processToken` (`graduation.mjs`) now reads the platform
+wallet's real current COIN balance for the mint (`getTokenBalance`)
+right after closing the pre-market position, instead of
+`run.coin_recovered_atomic` — this naturally picks up both the
+held-back reserve *and* whatever dust really did come back, with
+nothing stranded and nothing double-counted.
+
+**Verified the actual claim — price continuity — with real SDK math,**
+not by assuming pump.fun's numbers just carry over: computed the real
+marginal COIN/SOL price at `calibratePreMarketPool`'s own ceiling tick
+via `TickUtil.tickToPrice`, and compared it against the final pool's
+own implied price (`PREMARKET_TARGET_RAISE_SOL / heldBackCoinWhole`).
+They match to within 0.37% (pure tick-spacing rounding, not a real
+discontinuity) — at 1B supply, that's roughly **412 SOL market cap**
+immediately before full depletion and **~411 SOL** immediately after,
+both ways `coinIsMintA` can land. A full real end-to-end graduation
+(needs the pre-market pool to actually raise ~85 SOL) wasn't affordable
+to run this pass — same devnet-SOL constraint as the other gaps in this
+document — so this is verified by real on-chain balance + real SDK
+price math, not a live graduation run. Flagged as the one piece still
+worth a real run once there's budget for it.

@@ -2117,3 +2117,66 @@ rejected outright rather than silently mishandled. `createCpmmPoolAndLock`'s
 surface in Perpside's own code, not just correctly plumbing an existing
 param) is **not** verified end-to-end — flagged here rather than left
 unstated, same as every other budget-driven gap in this document.
+
+## Launch fee bug: graduation cost was charged twice, to the wrong party (2026-10-06)
+
+Real production bug, reported by the user trying an actual mainnet
+launch: the connected wallet rejected the fee transaction outright —
+"Simulation failed. This transaction will likely fail even if submitted
+on-chain" — before it even reached Perpside's own server (no
+corresponding error in production logs, consistent with a wallet-side
+preflight simulation failing on insufficient balance, not a backend
+error).
+
+**Root cause, confirmed by re-reading `calculateLaunchFeeLamports`'s own
+reasoning (part 5 of this document):** it charged the creator
+`assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS` up front —
+~0.2306 SOL (measured cost + margin) *per backing asset*, on top of
+mint + pre-market pool — reasoned at the time as "nobody's left to
+charge at graduation." That reasoning missed something real: graduation
+only ever runs after the pre-market pool has *already* raised ~85 SOL
+from genuine market trading. That raised SOL is exactly "somebody left
+to charge" — it just hadn't been accounted for as a funding source. The
+result: a 3-asset launch cost **~0.89 SOL** just in the up-front fee
+(1-asset: ~0.43 SOL) — a real, measured number from part 5's own devnet
+test — almost certainly larger than a typical creator's wallet balance
+for an unproven beta platform, exactly matching the reported wallet
+rejection.
+
+**Fix: graduation's real rent+fee cost is now reserved out of the SOL
+it raises, not pre-charged to the creator.** Two changes, both in
+`solana.mjs`:
+- `calculateLaunchFeeLamports()` dropped its `assetCount` parameter
+  entirely — it now only covers mint + pre-market pool, the two real
+  costs that exist before a single trade has happened and before
+  there's any other source of funds. **New flat fee: ~0.1968 SOL,
+  regardless of how many backing assets are chosen** (down from
+  ~0.43–0.89 SOL).
+- `MEASURED_GRADUATION_PER_ASSET_LAMPORTS` is now exported alongside a
+  new `graduationReserveLamports()` helper (same figure, same 15%
+  margin) instead of being folded into the fee formula.
+  `graduation.mjs`'s `processAsset` reserves this amount out of each
+  asset's raised-SOL share *before* swapping the rest into that asset —
+  left behind as native SOL in the platform wallet, which
+  `createCpmmPoolAndLock` then draws on directly for the real pool's
+  rent and transaction fees moments later in the same call. A launch
+  that never reaches graduation (abandoned pre-market pool) now never
+  incurs this cost at all, instead of the creator having pre-paid for a
+  pool that's never created.
+
+**Verified for real, scoped to what didn't need 85 SOL.** The new
+`calculateLaunchFeeLamports()`/`graduationReserveLamports()` figures
+were computed for real against the live constants (0.19681905 SOL flat
+fee, 0.23058995 SOL reserve per asset). The reservation arithmetic
+itself — share minus reserve, summed back with n × reserve, for 1/2/3
+assets — was checked against real `BN` math and reconciles exactly to
+the total raised in every case. What wasn't re-verified: a full real
+launch → organic 85 SOL depletion → graduation run with the new
+reservation logic in place. `swapPlatformSolForAsset` and
+`createCpmmPoolAndLock` themselves are unchanged by this fix (they
+still just receive a lamport amount and a mint, same as before, already
+verified real on-chain earlier in this document) — the new logic is
+confined to how much gets handed to the first of those two calls — but
+a composed end-to-end run wasn't affordable this pass (same devnet-SOL
+constraint as the Token-2022 gap above). Flagged rather than silently
+assumed correct.

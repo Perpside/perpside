@@ -228,24 +228,42 @@ export const TOTAL_SUPPLY_WHOLE = 1_000_000_000n;
 // nearly free, pool creation is the real cost, with a safety margin so the
 // platform never operates at a loss on rent-price drift.
 //
-// Under the pre-market/graduation model (see docs/token-launch-plan.md
-// "Graduation") the platform's real cost is split across two very
-// different times: createPreMarketPool happens right now, once, regardless
-// of how many backing assets the creator picked — but createCpmmPoolAndLock
-// happens later, at graduation, once *per* backing asset, on the
-// platform's own wallet with no one left to charge at that point. Folding
-// assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS into the fee here
-// prefunds that future cost up front, the same anti-spam-not-revenue
-// principle as before, just accounting for cost that lands later instead
-// of assuming it's zero because it isn't paid immediately.
+// Deliberately does NOT include createCpmmPoolAndLock's cost (see
+// MEASURED_GRADUATION_PER_ASSET_LAMPORTS below) — an earlier version of
+// this function charged assetCount * that figure up front, reasoned as
+// "nobody's left to charge at graduation time". That reasoning was wrong:
+// there is somebody to charge — the ~85 SOL graduation itself just raised
+// from real trading against the pre-market pool. graduation.mjs reserves
+// this cost out of each asset's raised-SOL share before swapping the rest
+// into that asset (see its own comment), so it's funded by the coin's own
+// market activity instead of charged to the creator before a single trade
+// has happened. Charging it twice (here AND reserved at graduation) would
+// overcharge the creator for real — this fee only ever covers what has no
+// other funding source: the mint and the pre-market pool, both of which
+// happen before any trading could have raised anything yet.
 const MEASURED_MINT_LAMPORTS = 2_575_000; // ~0.0026 SOL observed
 const MEASURED_PREMARKET_POOL_LAMPORTS = 168_572_000; // ~0.1686 SOL observed, createPreMarketPool (one-time, any assetCount)
-const MEASURED_GRADUATION_PER_ASSET_LAMPORTS = 200_513_000; // ~0.2005 SOL observed, createCpmmPoolAndLock, per backing asset
+// ~0.2005 SOL observed, createCpmmPoolAndLock, per backing asset — NOT part
+// of calculateLaunchFeeLamports (see its own comment); exported so
+// graduation.mjs can reserve the same real, measured figure out of raised
+// SOL instead of maintaining a second guess at the same number.
+export const MEASURED_GRADUATION_PER_ASSET_LAMPORTS = 200_513_000;
 const FEE_SAFETY_MARGIN = 1.15; // +15% buffer over the raw measured cost
 
-export function calculateLaunchFeeLamports(assetCount) {
-  const raw = MEASURED_MINT_LAMPORTS + MEASURED_PREMARKET_POOL_LAMPORTS + assetCount * MEASURED_GRADUATION_PER_ASSET_LAMPORTS;
+export function calculateLaunchFeeLamports() {
+  const raw = MEASURED_MINT_LAMPORTS + MEASURED_PREMARKET_POOL_LAMPORTS;
   return Math.ceil(raw * FEE_SAFETY_MARGIN);
+}
+
+// The real rent+fee cost of one createCpmmPoolAndLock call, margined the
+// same way the launch fee is — reserved out of a backing asset's raised-SOL
+// share at graduation (see graduation.mjs processAsset) before the rest of
+// that share gets swapped into the asset, so this real cost is funded by
+// what the coin's own pre-market trading raised, not pre-charged to the
+// creator for a pool that doesn't exist yet and might never need creating
+// (a launch that never reaches graduation never incurs this cost at all).
+export function graduationReserveLamports() {
+  return Math.ceil(MEASURED_GRADUATION_PER_ASSET_LAMPORTS * FEE_SAFETY_MARGIN);
 }
 
 let connectionSingleton;

@@ -109,14 +109,15 @@ async function assertAssets(assets) {
 }
 
 // Step 1: build the launch fee transfer (creator -> platform, sized to the
-// real cost of minting + the pre-market pool + N backing assets' worth of
-// graduation cost, see calculateLaunchFeeLamports). This is the only thing
-// the creator ever signs — everything downstream is platform-sponsored and
-// platform-signed.
+// real cost of minting + opening the pre-market pool, see
+// calculateLaunchFeeLamports — graduation's own cost is funded later out of
+// what the pre-market pool actually raises, not charged here). This is the
+// only thing the creator ever signs — everything downstream is
+// platform-sponsored and platform-signed.
 export async function prepareFee({ creatorWallet, assets }) {
   if (!creatorWallet) throw new LaunchValidationError('connect a wallet before launching');
   await assertAssets(assets);
-  const feeLamports = calculateLaunchFeeLamports(assets.length);
+  const feeLamports = calculateLaunchFeeLamports();
   // `cluster` tells the frontend which network this transaction was built
   // against, so it can pass the matching Wallet Standard `chain` string
   // when asking for a signature — hardcoding that client-side would silently

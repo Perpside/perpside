@@ -10,7 +10,7 @@
 import { randomUUID } from 'crypto';
 import BN from 'bn.js';
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
-import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted } from './solana.mjs';
+import { closePreMarketPool, swapPlatformSolForAsset, createCpmmPoolAndLock, isPreMarketPoolDepleted, graduationReserveLamports } from './solana.mjs';
 import {
   listPremarketTokens,
   listGraduatingTokens,
@@ -61,9 +61,23 @@ async function processAsset(token, row, totalRewardFeePercent) {
     let swapTx = row.swap_tx;
     let assetAmountAtomic = row.asset_amount_atomic ? new BN(row.asset_amount_atomic) : null;
     if (!swapTx) {
+      // createCpmmPoolAndLock's own real rent+fee cost comes out of this
+      // share before the rest gets swapped into the asset, left behind as
+      // native SOL in the platform wallet for createCpmmPoolAndLock to draw
+      // on directly below — funded by what the coin's own pre-market
+      // trading actually raised, not pre-charged to the creator at launch
+      // (see solana.mjs calculateLaunchFeeLamports's own comment on why
+      // that changed). row.sol_share_lamports itself stays the real gross
+      // share — this reserve is accounted for here, not by changing what
+      // got persisted as this asset's share of what was raised.
+      const solShareLamports = new BN(row.sol_share_lamports);
+      const reserve = new BN(graduationReserveLamports());
+      if (!solShareLamports.gt(reserve)) {
+        throw new Error(`sol share ${solShareLamports.toString()} too small to cover the graduation reserve (${reserve.toString()}) for ${row.backing_asset_mint}`);
+      }
       const swapResult = await swapPlatformSolForAsset({
         assetMint: row.backing_asset_mint,
-        amountInLamports: new BN(row.sol_share_lamports),
+        amountInLamports: solShareLamports.sub(reserve),
       });
       markGraduationRunAssetSwapped(row.id, swapResult.txId, swapResult.amountOutAtomic);
       swapTx = swapResult.txId;

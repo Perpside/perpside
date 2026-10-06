@@ -1517,6 +1517,19 @@
     color: var(--color-ink-muted);
   }
 
+  .explore-card__premarket {
+    display: inline-block;
+    margin-top: 0.3rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 9999px;
+    background: rgba(234, 179, 8, 0.18);
+    border: 1px solid rgba(234, 179, 8, 0.4);
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: #eab308;
+    white-space: nowrap;
+  }
+
   .header-launch-btn {
     border: none;
     background: none;
@@ -2573,7 +2586,7 @@
                 <li><b>Links</b> (optional) &mdash; attach an X account, Telegram, and website so traders can find the community.</li>
               </ol>
               <p>Submitting charges one fee, paid straight to the transaction &mdash; sized to the real on&#8209;chain cost of minting the coin, opening its pre&#8209;market pool now, and opening + locking one final pool per backing asset later at graduation, plus a small margin. It isn't a flat platform markup, and it exists mainly as anti&#8209;spam: this is the real cost of everything a launch sets in motion whether Perpside sponsors it or not, so this just makes sure the person launching is the one paying for what they're creating.</p>
-              <p>Once that transaction lands, the mint, its metadata, and its pre&#8209;market pool are all created in the same flow &mdash; the coin is immediately tradeable, on&#8209;chain, with nothing left to wait on. It isn't listed on Perpside's own Explore page yet, though &mdash; that happens once it graduates (see the next section).</p>
+              <p>Once that transaction lands, the mint, its metadata, and its pre&#8209;market pool are all created in the same flow &mdash; the coin is immediately tradeable, on&#8209;chain, and immediately listed on Explore too, tagged "Pre&#8209;market" until it graduates (see the next section).</p>
             </div>
 
             <div class="how-section" data-section="graduation" hidden>
@@ -2582,7 +2595,7 @@
               <p>The pre&#8209;market pool charges no trading fee &mdash; it exists purely for price discovery, not revenue, and nothing about its activity is skimmed before graduation.</p>
               <p><b>Graduation</b> happens automatically the moment that pool fully sells out. Perpside closes the position, recovers the real SOL it raised, and splits that SOL evenly across the coin's 1&ndash;3 chosen backing assets &mdash; swapping each share into its asset and opening a brand&#8209;new CPMM pool for it, seeded with real reserves on both sides. Each of these final pools is locked permanently through Raydium's own Lock LP program the instant it's created &mdash; the same block, not a later step &mdash; closing off the only path Raydium's program allows for ever withdrawing that liquidity again.</p>
               <p>Detecting the exact moment a pool depletes doesn't wait on a fixed schedule: Perpside holds a live subscription on every active pre&#8209;market pool and reacts the moment a depleting trade lands, so graduation is effectively instant &mdash; whether that trade came through Perpside's own interface or anywhere else trading against the pool. A background check every 10 minutes backs this up independently, so graduation never depends on a single subscription staying alive.</p>
-              <p>Once a coin graduates, it appears on Perpside's own Explore page, and trading moves to its new, permanently&#8209;locked pools &mdash; this is also the point its reward model (see next section) starts actually paying out.</p>
+              <p>Once a coin graduates, its Explore card drops the "Pre&#8209;market" badge and trading moves to its new, permanently&#8209;locked pools &mdash; this is also the point its reward model (see next section) starts actually paying out.</p>
             </div>
 
             <div class="how-section" data-section="fees" hidden>
@@ -2600,7 +2613,7 @@
 
             <div class="how-section" data-section="trading" hidden>
               <h2>Trading &amp; Wallet</h2>
-              <p>The <b>Explore</b> page lists every graduated coin on Perpside, sorted by Trending, New, or Top market cap, with search by name or ticker. A coin that hasn't graduated yet is still real and tradeable on&#8209;chain &mdash; it just isn't listed here until it does.</p>
+              <p>The <b>Explore</b> page lists every coin on Perpside, sorted by Trending, New, or Top market cap, with search by name or ticker &mdash; pre&#8209;market coins too, tagged with a "Pre&#8209;market" badge, not just graduated ones. A coin needs real outside trading to ever reach graduation, so it has to be findable before that happens, not just after.</p>
               <p>Clicking a coin opens its token page on Jupiter, which aggregates across all of its liquidity by mint address automatically &mdash; this works the same whether a coin is still trading through its single pre&#8209;market pool or has already graduated into multiple locked pools, with no separate link needed per pool.</p>
               <p>Trading happens through your own Solana wallet &mdash; Phantom, Jupiter, Backpack, Solflare, and others are detected automatically when you connect. Perpside never takes custody of your funds and never has access to your keys; every trade is a transaction you sign yourself, straight against the pool, on&#8209;chain.</p>
             </div>
@@ -2953,6 +2966,7 @@
               '<div class="explore-card__text">' +
                 '<div class="explore-card__name">' + token.name + '</div>' +
                 '<span class="explore-card__ticker">' + token.ticker + '</span>' +
+                (token.status && token.status !== 'complete' ? '<span class="explore-card__premarket">Pre-market</span>' : '') +
               '</div>' +
               socialIconsHtml(token.links) +
             '</div>' +
@@ -2976,10 +2990,17 @@
           .catch(function () { return null; });
       }
 
-      // Only 'complete' launches show up — anything still minting/pending
-      // pools, or that failed partway, isn't a real tradeable token yet
-      // (see docs/token-launch-plan.md tokens.status).
+      // 'premarket'/'graduating' launches show up too, not just 'complete'
+      // — they're real, tradeable Raydium pools from the moment they land
+      // (see docs/token-launch-plan.md "How it works" → Pre-Market &
+      // Graduation), and hiding them from Explore meant the only way
+      // anyone but the creator could ever find and trade one — the exact
+      // activity that pushes it toward graduation — was a direct link.
+      // 'minting'/'failed' stay excluded: not a real token yet, or never
+      // became one.
       function mapDbToken(t) {
+        var pools = t.pools || [];
+        var backingAssets = t.backingAssets || [];
         return {
           mint: t.mint_address,
           name: t.name,
@@ -2987,9 +3008,13 @@
           image: t.image_url || undefined,
           cap: launchConfigCache ? launchConfigCache.targetFdvUsd : 5000,
           createdAt: t.created_at ? new Date(t.created_at).getTime() : 0,
-          position: (t.pools || []).map(function (p) {
-            return { asset: p.backing_asset, icon: assetIconMap[p.backing_asset] };
-          }),
+          status: t.status,
+          // Pre-graduation, final_pools is still empty — fall back to the
+          // assets actually chosen at launch time (backingAssets) so a
+          // pre-market card isn't left with no badge at all.
+          position: pools.length
+            ? pools.map(function (p) { return { asset: p.backing_asset, icon: assetIconMap[p.backing_asset] }; })
+            : backingAssets.map(function (a) { return { asset: a.symbol, icon: assetIconMap[a.symbol] }; }),
           rewardModel: {
             community: t.community_fee || 0,
             creator: t.creator_fee || 0,
@@ -3010,7 +3035,8 @@
           fetchLaunchConfig()
         ]).then(function (results) {
           var tokens = Array.isArray(results[0]) ? results[0] : [];
-          tokensCache = tokens.filter(function (t) { return t.status === 'complete'; }).map(mapDbToken);
+          var VISIBLE_STATUSES = { premarket: true, graduating: true, complete: true };
+          tokensCache = tokens.filter(function (t) { return VISIBLE_STATUSES[t.status]; }).map(mapDbToken);
         }).catch(function () {
           tokensCache = [];
         });

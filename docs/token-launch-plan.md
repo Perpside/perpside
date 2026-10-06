@@ -2406,3 +2406,34 @@ deployed: confirmed `/api/tokens/HYdHdFhFj14...` returns a populated
 `backingAssets` array and an (empty, correctly so) `pools` array, and
 loaded the live token detail page in a real headless browser to
 confirm it renders the pre-market messaging with zero console errors.
+
+## Explore: pre-market coins listed too, not just graduated ones (2026-10-06)
+
+Follow-up to the previous entry — reaching a coin's own page directly
+after launch fixed the creator's own view, but every *other* user still
+had no way to discover or trade a pre-market coin at all: Explore only
+listed `status === 'complete'`. That's a real problem beyond
+discoverability — the pre-market phase only reaches its ~85 SOL
+graduation target through genuine outside trading (see "How it works"
+→ Pre-Market & Graduation), and a coin only the creator can find can't
+attract that.
+
+**`fetchTokens()`** now shows `'premarket'` and `'graduating'` alongside
+`'complete'` — still excluding `'minting'` (not a real token yet) and
+`'failed'`. **`mapDbToken`** falls back to `token.backingAssets` (the
+launch-time-resolved list) for the card's asset-icon badge when
+`pools` is still empty, same reasoning as the detail page's own
+fallback in the previous entry. **`renderCard`** adds a small
+"Pre-market" pill next to the ticker for anything not yet `'complete'`,
+so a pre-market card doesn't read as a finished, graduated launch.
+
+Known, accepted gap carried over from before this entry: a card's
+market cap is still the flat `targetFdvUsd` placeholder for every
+status, graduated or not (see part 5's own note on this) — unaffected
+by and out of scope for this change.
+
+**Verified for real**, against the live `dCat` token (the one real
+mainnet launch that exists) and a synthetic `'complete'` token side by
+side, in a real headless browser pointed at the real `/api/tokens`
+response shape: both cards render, only the pre-market one carries the
+badge, zero console errors.

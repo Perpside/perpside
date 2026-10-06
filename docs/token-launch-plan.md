@@ -2353,3 +2353,56 @@ a server's entire lifetime) without being *the* cause of what the user
 was actually hitting — found only by finally reading the dependency's
 own source for its commitment handling instead of continuing to guess
 at network/infrastructure explanations.
+
+## First real mainnet token: minted, but invisible in the UI — two real gaps found (2026-10-06)
+
+The Irys fix above worked — `HYdHdFhFj14DKRH4cgfBsgQo5TRHQaN2zCeMoTTt9J12`
+("dCat") is the first token this platform has ever actually minted on
+real mainnet. Reported as "created but not showing in the UI." Checked
+the real production DB first rather than guessing: the token is real,
+`status: 'premarket'`, nothing wrong with it on-chain.
+
+**Gap 1 — by design, but with no way to see it.** Explore only lists
+`status === 'complete'` (graduated) tokens — correct, documented
+behavior (see the "How it works" rewrite's own Pre-Market & Graduation
+section). But after a successful launch, the frontend's submit handler
+sent the creator back to `'earn'` (Explore) — which, for a brand-new
+`'premarket'` token, means "launch succeeded" and "nothing happened"
+looked identical from the creator's side. There was no link anywhere
+in the UI to a coin's own detail page except an Explore card click,
+and Explore wouldn't show this card for potentially hours/days (until
+the pre-market pool depletes).
+
+**Gap 2 — a real, independent bug, not just a missing link.** Even
+once reachable, the token detail page would have shown "No backing
+assets on record" for *every* token, graduated or not.
+`getToken`/`listTokens` (`db.mjs`) still queried the legacy
+`token_pools` table (CLMM, dead since the pre-market/graduation
+rewrite — `listCompleteTokens`'s own comment already documented this
+table as abandoned) instead of `final_pools` (CPMM, what graduation
+actually writes to) — missed when that rewrite landed because nothing
+had exercised these two specific functions for real since. Also never
+selected or parsed the `backing_assets` JSON column at all, unlike
+`listPremarketTokens`/`getPremarketToken`/`listGraduatingTokens`, which
+already did both correctly.
+
+**Fixes:**
+- `db.mjs`: `getToken`/`listTokens` now read `final_pools` (matching
+  every other query in this codebase) and parse `backing_assets` into
+  `backingAssets`, the same pattern already used elsewhere.
+- `index.html` submit handler: on success, navigates to the new coin's
+  own detail page (`showTokenDetail(data.mint)`) instead of back to
+  Explore — reusing the exact function Explore's own card-click handler
+  already calls, not a new code path.
+- `index.html` token detail renderer: the "Backing assets" card now
+  falls back to `token.backingAssets` (resolved at launch time, real
+  even before graduation) when `pools` is empty, labeled "Pre-market —
+  pools open once trading fully depletes the launch position" instead
+  of showing per-pool share percentages that don't exist yet — so a
+  premarket coin's page reads as "not graduated yet," not "broken."
+
+**Verified for real** against this exact real mainnet token once
+deployed: confirmed `/api/tokens/HYdHdFhFj14...` returns a populated
+`backingAssets` array and an (empty, correctly so) `pools` array, and
+loaded the live token detail page in a real headless browser to
+confirm it renders the pre-market messaging with zero console errors.

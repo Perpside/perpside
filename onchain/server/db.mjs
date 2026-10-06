@@ -335,18 +335,30 @@ const PUBLIC_TOKEN_COLUMNS = `
   x_link, telegram_link, website_link, community_fee, creator_fee, buyback_fee, created_at
 `;
 
+// Reads real pools from final_pools (CPMM, populated at graduation — see
+// graduation.mjs), not the legacy token_pools table (CLMM, dead since the
+// pre-market/graduation rewrite — see listCompleteTokens's own comment).
+// getToken/listTokens read from token_pools for a while after that
+// rewrite landed — a real, previously-unnoticed bug: every token's own
+// detail page showed "No backing assets on record" regardless of status,
+// since nothing has written to token_pools since. backing_assets is also
+// selected and parsed into backingAssets now, the same way
+// listPremarketTokens/getPremarketToken/listGraduatingTokens already do —
+// so a still-premarket token's detail page can show its *chosen* backing
+// assets even before final_pools has anything in it yet.
 export function getToken(mintAddress) {
-  const token = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens WHERE mint_address = ?`).get(mintAddress);
+  const token = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens WHERE mint_address = ?`).get(mintAddress);
   if (!token) return null;
-  const pools = db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(mintAddress);
-  return { ...token, pools };
+  const pools = db.prepare('SELECT * FROM final_pools WHERE mint_address = ?').all(mintAddress);
+  return { ...token, backingAssets: token.backing_assets ? JSON.parse(token.backing_assets) : null, pools };
 }
 
 export function listTokens() {
-  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS} FROM tokens ORDER BY created_at DESC`).all();
+  const tokens = db.prepare(`SELECT ${PUBLIC_TOKEN_COLUMNS}, backing_assets FROM tokens ORDER BY created_at DESC`).all();
   return tokens.map((t) => ({
     ...t,
-    pools: db.prepare('SELECT * FROM token_pools WHERE mint_address = ?').all(t.mint_address),
+    backingAssets: t.backing_assets ? JSON.parse(t.backing_assets) : null,
+    pools: db.prepare('SELECT * FROM final_pools WHERE mint_address = ?').all(t.mint_address),
   }));
 }
 

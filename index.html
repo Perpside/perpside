@@ -3315,17 +3315,36 @@
           ? "background-image: url('" + escapeAttr(token.image_url) + "');"
           : (function () { var c = paletteFor(mint || token.name || 'x'); return 'background: linear-gradient(135deg, ' + c[0] + ', ' + c[1] + ');'; })();
 
+        // pools (final_pools) only exist once this coin has graduated —
+        // before that, its chosen assets are still real (resolved and
+        // locked in at launch time, see launch.mjs assertAssets), just not
+        // materialized into pools yet. Showing them from token.backingAssets
+        // instead of a blank "No backing assets on record" is the
+        // difference between "this coin hasn't graduated yet" and "this
+        // coin has no backing assets at all".
         var sharePct = pools.length ? Math.round(100 / pools.length) : 0;
-        var assetsHtml = pools.length
-          ? '<div class="token-detail__assets">' + pools.map(function (p) {
-              var icon = assetIconMap[p.backing_asset];
+        var assetsHtml;
+        if (pools.length) {
+          assetsHtml = '<div class="token-detail__assets">' + pools.map(function (p) {
+            var icon = assetIconMap[p.backing_asset];
+            return '<div class="token-detail__asset-row">' +
+              (icon ? '<img src="' + escapeAttr(icon) + '" alt="">' : '') +
+              '<span class="token-detail__asset-symbol">' + escapeHtml(p.backing_asset) + '</span>' +
+              '<span class="token-detail__asset-share">~' + sharePct + '% of supply</span>' +
+            '</div>';
+          }).join('') + '</div>';
+        } else if (token.backingAssets && token.backingAssets.length) {
+          assetsHtml = '<p class="token-detail__empty">Pre-market — pools open once trading fully depletes the launch position.</p>' +
+            '<div class="token-detail__assets">' + token.backingAssets.map(function (a) {
+              var icon = assetIconMap[a.symbol];
               return '<div class="token-detail__asset-row">' +
                 (icon ? '<img src="' + escapeAttr(icon) + '" alt="">' : '') +
-                '<span class="token-detail__asset-symbol">' + escapeHtml(p.backing_asset) + '</span>' +
-                '<span class="token-detail__asset-share">~' + sharePct + '% of supply</span>' +
+                '<span class="token-detail__asset-symbol">' + escapeHtml(a.symbol) + '</span>' +
               '</div>';
-            }).join('') + '</div>'
-          : '<p class="token-detail__empty">No backing assets on record.</p>';
+            }).join('') + '</div>';
+        } else {
+          assetsHtml = '<p class="token-detail__empty">No backing assets on record.</p>';
+        }
 
         var tokenomics = tokenomicsHtml(token, backingAssets, launchConfig);
         var cap = launchConfig ? launchConfig.targetFdvUsd : 5000;
@@ -4312,14 +4331,21 @@
             // gets its own non-blocking message instead of the outer catch.
             var firstBuyDone = (!isNaN(firstBuyAmount) && firstBuyAmount > 0)
               ? performFirstBuy(creatorWallet, data.mint, firstBuyAmount).catch(function (err) {
-                  showLaunchError('Coin launched, but First Buy failed: ' + (err.message || 'unknown error') + ' — you can still buy it from Explore.');
+                  showLaunchError('Coin launched, but First Buy failed: ' + (err.message || 'unknown error') + ' — you can still buy it from its own page.');
                 })
               : Promise.resolve();
 
             return firstBuyDone.then(function () {
               resetForm();
-              if (window.showAppPage) window.showAppPage('earn');
               if (window.renderExploreGrid) window.renderExploreGrid();
+              // A freshly-launched coin is in 'premarket' status — real and
+              // tradeable on-chain, but Explore only lists graduated ones
+              // (see docs/token-launch-plan.md "How it works" → Pre-Market
+              // & Graduation), so going back to Explore/earn here would
+              // make a successful launch look like it vanished. Its own
+              // detail page works for any status.
+              if (window.showTokenDetail) window.showTokenDetail(data.mint);
+              else if (window.showAppPage) window.showAppPage('earn');
             });
           })
           .catch(function (err) {

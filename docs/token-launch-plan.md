@@ -2530,3 +2530,67 @@ direct `/app?coin=...` load renders the right coin; in-app Back cleans
 the URL back to `/app` and shows Explore; clicking an Explore card
 restores `?coin=...`; real browser Back and Forward both do the right
 thing too. Zero console errors throughout.
+
+## External listings: a coin Explore displays but never manages (2026-10-07)
+
+User wants to list a specific coin ("PRPS") that's launched elsewhere
+(pump.fun-style, real mint still pending) alongside Perpside's own
+launches — same Explore page, no Pre-market badge (it has no
+graduation coming, so that badge would be actively wrong), and its
+market cap read live from Jupiter rather than Perpside's own flat
+placeholder, showing nothing if Jupiter has no data for it yet. Scoped
+to this one row only — every other launch keeps working exactly as
+before.
+
+**New `status` value: `'external'`.** No schema change — `tokens.status`
+was already a plain `TEXT` column with no `CHECK` constraint. The key
+property: every internal process that touches tokens filters by a
+*specific* status (`listPremarketTokens`/`listGraduatingTokens`/
+`listCompleteTokens` all query exact string matches) — `'external'`
+matches none of them, so pool-watcher, graduation-cron, and reward-cron
+all skip this row automatically, with no new exclusion logic needed
+anywhere server-side. It's inert by construction, not by a check
+someone has to remember to add.
+
+**Frontend, three places:**
+- `fetchTokens()`/`renderCard` (Explore): `'external'` added to
+  `VISIBLE_STATUSES`; the Pre-market badge condition now also excludes
+  it; `mapDbToken` leaves `cap` as `null` for it instead of the flat
+  `targetFdvUsd` placeholder, and a new `fetchJupiterMcap(mint)` fills
+  it in for real (or leaves it `null` on a miss) before the grid
+  renders — `lite-api.jup.ag/tokens/v2/search`'s real response has a
+  `mcap` field (confirmed by querying it directly, not assumed).
+  `renderCard` only renders the MC pill when `cap != null`.
+- `showTokenDetail`/`render` (the coin's own page): same Jupiter lookup,
+  same null-safe cap rendering; the "Backing assets" card skips the
+  "Pre-market — pools open once..." line for `'external'` tokens
+  specifically (it still shows the chosen assets, just without the
+  line that's only true for Perpside's own pre-market phase).
+- `fetchJupiterMcap` is duplicated between the two IIFEs rather than
+  shared — matches this file's existing pattern (`fetchLaunchConfig`/
+  `fetchBackingAssets` are already each duplicated per-IIFE the same
+  way), not an oversight.
+
+**DB migration (one-off, direct, same method as the earlier dCat
+cleanup):** deleted the old Perpside-native `PRPS` row (real mint
+`5QhBqT3yJEp2NqVdt4JWQxb566tAYVLowA73yDFQzSTw`, status `premarket`,
+real on-chain pool `8sJCyv3N5qBjwB6A2wrYvucPDeVfuCHbXj6BUWNnq4nT`) and
+its `premarket_pools` row, then inserted a fresh `tokens` row with
+`status: 'external'`, `backing_assets: [{symbol:"SOL", mint: SOL_MINT,
+decimals:9}]`, and all three reward-fee columns zeroed (so the detail
+page's Reward model card correctly shows "wasn't launched with a
+reward model" instead of a split Perpside isn't actually tracking).
+**Mint address is a placeholder** (`PENDING-PRPS-MINT-TBD`) — the real
+one wasn't available yet; nothing server-side ever parses `mint_address`
+as a real `PublicKey` for a non-`premarket`/`graduating`/`complete`
+row, so this is safe to sit as-is, but the Trade link and Jupiter cap
+lookup won't resolve to anything real until the row is updated with
+the actual mint (same `tokens` PK swap as the dCat delete — update
+this specific row once the real mint is known).
+
+**Verified for real**, locally: one mock row pointed at `SOL`'s real
+mint (to exercise the genuine Jupiter-hit path — real mcap rendered,
+~$68.6B, matching Jupiter's own live number) and one at the literal
+placeholder mint (to exercise the miss path — no cap shown anywhere,
+card or detail page). Pre-market badge correctly absent on both. Zero
+console errors.

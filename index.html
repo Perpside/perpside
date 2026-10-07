@@ -2985,15 +2985,23 @@
           var colors = palettes[index % palettes.length];
           mediaStyle = 'background: linear-gradient(135deg, ' + colors[0] + ', ' + colors[1] + ');';
         }
+        // External listings (status 'external' — a real token from
+        // elsewhere, not launched through Perpside, no graduation ever
+        // coming) skip the Pre-market badge entirely, and their cap comes
+        // from fetchTokens' own live Jupiter lookup rather than Perpside's
+        // flat placeholder — token.cap is null/undefined when Jupiter has
+        // no data for it, and the badge is simply omitted rather than
+        // showing a misleading number.
+        var isExternal = token.status === 'external';
         card.innerHTML =
           '<div class="explore-card__media" style="' + mediaStyle + '">' +
-            '<span class="explore-card__cap">' + fmtCap(token.cap) + ' <span class="explore-card__cap-label">MC</span></span>' +
+            (token.cap != null ? '<span class="explore-card__cap">' + fmtCap(token.cap) + ' <span class="explore-card__cap-label">MC</span></span>' : '') +
             positionBadgeHtml(token) +
             '<div class="explore-card__info">' +
               '<div class="explore-card__text">' +
                 '<div class="explore-card__name">' + token.name + '</div>' +
                 '<span class="explore-card__ticker">' + token.ticker + '</span>' +
-                (token.status && token.status !== 'complete' ? '<span class="explore-card__premarket">Pre-market</span>' : '') +
+                (token.status && token.status !== 'complete' && !isExternal ? '<span class="explore-card__premarket">Pre-market</span>' : '') +
               '</div>' +
               socialIconsHtml(token.links) +
             '</div>' +
@@ -3033,7 +3041,10 @@
           name: t.name,
           ticker: t.ticker,
           image: t.image_url || undefined,
-          cap: launchConfigCache ? launchConfigCache.targetFdvUsd : 5000,
+          // External listings don't get Perpside's flat placeholder cap —
+          // fetchTokens fills this in (or leaves it null) from a real
+          // Jupiter lookup once this token's own real mint is known.
+          cap: t.status === 'external' ? null : (launchConfigCache ? launchConfigCache.targetFdvUsd : 5000),
           createdAt: t.created_at ? new Date(t.created_at).getTime() : 0,
           status: t.status,
           // Pre-graduation, final_pools is still empty — fall back to the
@@ -3056,14 +3067,36 @@
         };
       }
 
+      // External listings' only real economics live on Jupiter, not in
+      // Perpside's own DB — their mint is a real, independently-traded
+      // token, so this asks Jupiter directly rather than assuming
+      // anything. No fallback to Perpside's flat placeholder on a miss
+      // (unknown mint, not indexed yet): a token Explore doesn't actually
+      // track shouldn't show a number implying it does.
+      function fetchJupiterMcap(mint) {
+        return fetch('https://lite-api.jup.ag/tokens/v2/search?query=' + encodeURIComponent(mint))
+          .then(function (r) { return r.json(); })
+          .then(function (results) {
+            var match = Array.isArray(results) ? results.find(function (t) { return t.id === mint; }) : null;
+            return match && typeof match.mcap === 'number' ? match.mcap : null;
+          })
+          .catch(function () { return null; });
+      }
+
       function fetchTokens() {
         return Promise.all([
           fetch(LAUNCH_API_URL + '/api/tokens').then(function (res) { return res.json(); }),
           fetchLaunchConfig()
         ]).then(function (results) {
           var tokens = Array.isArray(results[0]) ? results[0] : [];
-          var VISIBLE_STATUSES = { premarket: true, graduating: true, complete: true };
-          tokensCache = tokens.filter(function (t) { return VISIBLE_STATUSES[t.status]; }).map(mapDbToken);
+          var VISIBLE_STATUSES = { premarket: true, graduating: true, complete: true, external: true };
+          var mapped = tokens.filter(function (t) { return VISIBLE_STATUSES[t.status]; }).map(mapDbToken);
+          var externalCapFetches = mapped
+            .filter(function (t) { return t.status === 'external'; })
+            .map(function (t) { return fetchJupiterMcap(t.mint).then(function (mcap) { t.cap = mcap; }); });
+          return Promise.all(externalCapFetches).then(function () {
+            tokensCache = mapped;
+          });
         }).catch(function () {
           tokensCache = [];
         });
@@ -3386,6 +3419,17 @@
               '<span class="token-detail__asset-share">~' + sharePct + '% of supply</span>' +
             '</div>';
           }).join('') + '</div>';
+        } else if (token.status === 'external' && token.backingAssets && token.backingAssets.length) {
+          // External listing (not launched through Perpside, see
+          // showTokenDetail) — real, already-trading token, just never
+          // going to graduate, so the pre-market messaging doesn't apply.
+          assetsHtml = '<div class="token-detail__assets">' + token.backingAssets.map(function (a) {
+            var icon = assetIconMap[a.symbol];
+            return '<div class="token-detail__asset-row">' +
+              (icon ? '<img src="' + escapeAttr(icon) + '" alt="">' : '') +
+              '<span class="token-detail__asset-symbol">' + escapeHtml(a.symbol) + '</span>' +
+            '</div>';
+          }).join('') + '</div>';
         } else if (token.backingAssets && token.backingAssets.length) {
           assetsHtml = '<p class="token-detail__empty">Pre-market — pools open once trading fully depletes the launch position.</p>' +
             '<div class="token-detail__assets">' + token.backingAssets.map(function (a) {
@@ -3400,7 +3444,12 @@
         }
 
         var tokenomics = tokenomicsHtml(token, backingAssets, launchConfig);
-        var cap = launchConfig ? launchConfig.targetFdvUsd : 5000;
+        // External listings' cap comes from a real Jupiter lookup
+        // (token.jupiterMcap, set by showTokenDetail before render runs),
+        // not Perpside's flat placeholder — null when Jupiter has nothing
+        // for this mint yet, same "show nothing rather than a misleading
+        // number" rule Explore's own cards follow.
+        var cap = token.status === 'external' ? token.jupiterMcap : (launchConfig ? launchConfig.targetFdvUsd : 5000);
 
         container.innerHTML =
           '<div class="token-detail__banner">' +
@@ -3413,7 +3462,7 @@
                   '<h1 class="token-detail__name">' + escapeHtml(token.name) + '</h1>' +
                   '<span class="token-detail__ticker">' + escapeHtml(token.ticker) + '</span>' +
                 '</div>' +
-                '<div class="token-detail__cap">' + fmtCap(cap) + '<span class="token-detail__cap-label">Market cap</span></div>' +
+                (cap != null ? '<div class="token-detail__cap">' + fmtCap(cap) + '<span class="token-detail__cap-label">Market cap</span></div>' : '') +
                 '<div class="token-detail__meta">' +
                   '<button type="button" class="token-detail__meta-item" data-copy="' + escapeAttr(mint) + '" title="Copy mint address">' + copyIconSvg() + shortAddr(mint) + '</button>' +
                   (token.creator_wallet ? '<button type="button" class="token-detail__meta-item" data-copy="' + escapeAttr(token.creator_wallet) + '" title="Copy creator wallet">' + copyIconSvg() + 'Creator ' + shortAddr(token.creator_wallet) + '</button>' : '') +
@@ -3457,6 +3506,19 @@
       // already says this coin (initial load of /app?coin=..., or a
       // popstate landing back on it) — only a real forward navigation
       // (an Explore card, the post-launch redirect) pushes a new entry.
+      // Same rule Explore's own cards follow (see fetchTokens' own
+      // comment): an external listing's cap is whatever Jupiter reports
+      // right now, with no fallback to Perpside's placeholder on a miss.
+      function fetchJupiterMcap(mint) {
+        return fetch('https://lite-api.jup.ag/tokens/v2/search?query=' + encodeURIComponent(mint))
+          .then(function (r) { return r.json(); })
+          .then(function (results) {
+            var match = Array.isArray(results) ? results.find(function (t) { return t.id === mint; }) : null;
+            return match && typeof match.mcap === 'number' ? match.mcap : null;
+          })
+          .catch(function () { return null; });
+      }
+
       window.showTokenDetail = function (mint, skipHistory) {
         if (!mint) return;
         if (window.showAppPage) window.showAppPage('token');
@@ -3473,7 +3535,14 @@
           fetchBackingAssets(),
           fetchLaunchConfig()
         ]).then(function (results) {
-          render(results[0], results[1] || {}, results[2]);
+          var token = results[0];
+          if (token.status === 'external') {
+            return fetchJupiterMcap(mint).then(function (mcap) {
+              token.jupiterMcap = mcap;
+              render(token, results[1] || {}, results[2]);
+            });
+          }
+          render(token, results[1] || {}, results[2]);
         }).catch(function () {
           container.innerHTML = '<p class="token-detail__empty">Couldn\'t load this coin — it may no longer exist.</p>';
         });

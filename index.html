@@ -2781,9 +2781,20 @@
         });
       }
 
+      // A coin deep link (?coin=mint, see showTokenDetail) rides on top of
+      // the same 'app' screen state rather than a separate mechanism —
+      // e.state.coin is only ever set by showTokenDetail's own pushState,
+      // so popping back to an entry without it falls back to Explore,
+      // which is the only other in-app page that's reachable via a direct
+      // link right now.
       window.addEventListener('popstate', function (e) {
         if (e.state && e.state.screen === 'app') {
           showApp();
+          if (e.state.coin && window.showTokenDetail) {
+            window.showTokenDetail(e.state.coin, true);
+          } else if (window.showAppPage) {
+            window.showAppPage('earn');
+          }
         } else {
           showLanding();
         }
@@ -2791,7 +2802,13 @@
 
       if (location.pathname === APP_PATH) {
         showApp();
-        history.replaceState({ screen: 'app' }, '', APP_PATH);
+        var bootCoin = new URLSearchParams(location.search).get('coin');
+        // Keeps ?coin=... in the address bar through this replace (a plain
+        // APP_PATH here would silently strip it on every /app load) —
+        // showTokenDetail itself (called once it's defined, further down)
+        // is what actually renders the token; this just keeps history.state
+        // consistent with the URL from the very first entry.
+        history.replaceState(bootCoin ? { screen: 'app', coin: bootCoin } : { screen: 'app' }, '', APP_PATH + location.search);
       } else {
         history.replaceState({ screen: 'landing' }, '', location.pathname + location.search);
       }
@@ -2835,6 +2852,16 @@
         // No point offering "Launch coin" in the header while already on
         // the launch page itself.
         if (headerLaunchBtn) headerLaunchBtn.hidden = name === 'portfolio';
+        // Leaving the token page should drop its ?coin= deep link too, so
+        // the address bar matches what's actually on screen — replaceState
+        // (not pushState) since this tidies up the current entry rather
+        // than creating a new navigable one. Covers both the in-app Back
+        // button (goBackFrom) and any other call that switches away from
+        // 'token'; showTokenDetail is the only place that adds the param
+        // back, when switching *to* a token.
+        if (name !== 'token' && new URLSearchParams(location.search).has('coin')) {
+          history.replaceState({ screen: 'app' }, '', '/app');
+        }
       };
     })();
 
@@ -3426,9 +3453,16 @@
         });
       }
 
-      window.showTokenDetail = function (mint) {
+      // skipHistory is true when called to *sync* the page with a URL that
+      // already says this coin (initial load of /app?coin=..., or a
+      // popstate landing back on it) — only a real forward navigation
+      // (an Explore card, the post-launch redirect) pushes a new entry.
+      window.showTokenDetail = function (mint, skipHistory) {
         if (!mint) return;
         if (window.showAppPage) window.showAppPage('token');
+        if (!skipHistory) {
+          history.pushState({ screen: 'app', coin: mint }, '', '/app?coin=' + encodeURIComponent(mint));
+        }
         container.innerHTML = '<p class="token-detail__loading">Loading…</p>';
 
         Promise.all([
@@ -3444,6 +3478,16 @@
           container.innerHTML = '<p class="token-detail__empty">Couldn\'t load this coin — it may no longer exist.</p>';
         });
       };
+
+      // Opens straight to the coin from a shared/bookmarked /app?coin=...
+      // link — showTokenDetail is only defined at this point in the script,
+      // not when the earlier boot IIFE ran, so this has to live here rather
+      // than there. skipHistory: true since the URL is already correct;
+      // this is syncing the page to it, not navigating.
+      if (location.pathname === '/app') {
+        var initialCoin = new URLSearchParams(location.search).get('coin');
+        if (initialCoin) window.showTokenDetail(initialCoin, true);
+      }
     })();
 
     (function () {

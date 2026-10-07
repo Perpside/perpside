@@ -2489,3 +2489,44 @@ to run this pass — same devnet-SOL constraint as the other gaps in this
 document — so this is verified by real on-chain balance + real SDK
 price math, not a live graduation run. Flagged as the one piece still
 worth a real run once there's budget for it.
+
+## Token pages get a real, shareable URL (2026-10-07)
+
+`showTokenDetail` only ever toggled page visibility client-side — the
+address bar stayed at plain `/app` no matter which coin was showing, so
+there was no way to share or bookmark a specific coin's page. Asked for
+`/app?coin=<mint>`.
+
+**Layered onto the existing single-level history system** (landing vs.
+app, see the boot IIFE's own comment on `APP_PATH`) rather than
+building a second one: `showTokenDetail(mint)` now pushes
+`{screen: 'app', coin: mint}` to `/app?coin=<mint>`; `popstate` checks
+`e.state.coin` and re-opens that token, falling back to Explore when
+it's absent (Explore is the only other in-app page reachable by a
+direct link right now, so that's the sane default rather than trying
+to reconstruct whatever page the stack had before). `showAppPage`
+strips a stale `coin` param (via `replaceState`, not `pushState` — this
+tidies the current entry rather than creating a new one) whenever it
+switches to anything other than `'token'`, which covers the in-app
+Back button for free since `goBackFrom` already calls `showAppPage`.
+
+**One real bug caught before it shipped:** the boot IIFE's existing
+`history.replaceState({screen:'app'}, '', APP_PATH)` for a plain
+`/app` load would have silently stripped `?coin=...` on every load,
+since `APP_PATH` is just `'/app'` with no query string — fixed to
+`APP_PATH + location.search`, matching the pattern the `else` branch
+(landing) already used.
+
+A direct load of `/app?coin=...` calls `showTokenDetail(mint, true)` —
+the new `skipHistory` param — once it's defined later in the script
+(the boot IIFE runs too early for it to exist yet); `true` means "sync
+the page to a URL that's already correct," used here and from
+`popstate`, vs. the default (`pushState`) used by every real forward
+navigation (an Explore card, the post-launch redirect).
+
+**Verified for real** in a headless browser against the live `PRPS`
+token's actual API shape, exercising all five transitions in sequence:
+direct `/app?coin=...` load renders the right coin; in-app Back cleans
+the URL back to `/app` and shows Explore; clicking an Explore card
+restores `?coin=...`; real browser Back and Forward both do the right
+thing too. Zero console errors throughout.
